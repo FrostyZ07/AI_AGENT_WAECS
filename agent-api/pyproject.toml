@@ -1,0 +1,24 @@
+[project]
+name = "agent-api"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "apscheduler>=3.11.3",
+    "fastapi>=0.163.2",
+    "google-api-python-client>=2.202.0",
+    "google-auth>=2.62.2",
+    "google-auth-oauthlib>=1.5.0",
+    "google-genai>=3.5.0",
+    "psycopg[binary]>=3.3.9",
+    "python-dotenv>=1.2.4",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.2.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
