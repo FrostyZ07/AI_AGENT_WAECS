@@ -429,6 +429,7 @@ def complete_task(task_id: str) -> None:
 _STOP_WORDS = {"meeting", "call", "sync", "catch", "with", "discussion", "review", "update", "weekly", "intro",
                "chat", "quick", "about", "from", "this", "that", "next"}
 _GDOC = "application/vnd.google-apps.document"
+_DOC_TYPES = (_GDOC, "application/vnd.google-apps.presentation", "application/pdf")
 
 
 def _esc(s: str) -> str:
@@ -437,19 +438,17 @@ def _esc(s: str) -> str:
 
 def search_docs(title: str, attendee_emails: list[str], limit: int = 5) -> list[dict]:
     """Recent Drive files whose name/text matches the meeting title, or that an attendee owns. Read-only."""
-    try:
-        me = principal_email().lower()
-    except NotConnected:
-        me = ""
-    words = [w for w in re.findall(r"[A-Za-z0-9]{4,}", title) if w.lower() not in _STOP_WORDS][:4]
-    emails = [e for e in attendee_emails if e.lower() != me][:4]
-    clauses = ([f"name contains '{_esc(w)}'" for w in words] + [f"fullText contains '{_esc(w)}'" for w in words]
-               + [f"'{_esc(e)}' in owners" for e in emails])
-    if not clauses:
+    # Strict on purpose: a file must contain ALL the meeting's key words (in its name, or in its text) and be a
+    # document/slides/PDF. Matching on any one word, or on who owns the file, pulled in unrelated sheets and docs.
+    words = list(dict.fromkeys(w.lower() for w in re.findall(r"[A-Za-z0-9]{4,}", title)
+                               if w.lower() not in _STOP_WORDS))[:3]
+    if not words:
         return []
-    since = (datetime.now(timezone.utc) - timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%S")
-    q = (f"trashed = false and modifiedTime > '{since}' and mimeType != 'application/vnd.google-apps.folder' "
-         f"and ({' or '.join(clauses)})")
+    by_name = " and ".join(f"name contains '{_esc(w)}'" for w in words)
+    by_text = " and ".join(f"fullText contains '{_esc(w)}'" for w in words)
+    kinds = " or ".join(f"mimeType = '{m}'" for m in _DOC_TYPES)
+    since = (datetime.now(timezone.utc) - timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%S")
+    q = f"trashed = false and modifiedTime > '{since}' and ({kinds}) and (({by_name}) or ({by_text}))"
     res = _svc("drive", "v3").files().list(
         q=q, orderBy="modifiedTime desc", pageSize=limit, fields="files(id,name,mimeType,webViewLink,modifiedTime)",
     ).execute()

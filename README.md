@@ -1,36 +1,54 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Executive Assistant Agent
 
-## Getting Started
+An AI assistant for a busy principal. It triages the inbox, drafts replies, proposes meetings, preps for calls and sends a daily brief. **Nothing is sent, booked or paid without the principal's approval.**
 
-First, run the development server:
+Built from the spec in `../07_executive_assistant_agent.md`.
+
+## What it does
+
+- **Inbox triage**: reads Gmail, skips newsletters and auto-mail, drafts replies and flags anything sensitive.
+- **Scheduling**: checks Google Calendar for clashes and working hours, then proposes invites.
+- **Daily brief**: emails today's meetings, pending approvals and follow-ups.
+- **Meeting prep**: pulls context from Google Drive (read-only).
+- **Approvals**: the principal reviews, edits, approves or rejects every action. Payment, travel and sensitive mail are escalated for sign-off only; the agent never pays or books.
+
+## Structure
+
+| Folder | What it is |
+| --- | --- |
+| [agent-api/](agent-api/) | Python backend (FastAPI + Gemini), Google access, Supabase Postgres, scheduler |
+| [project/](project/) | The UI (Next.js 16, Tailwind v4, shadcn): brief, approvals, calendar, settings |
+
+The `src/` app that older notes mention is the Phase 1/2 prototype and is no longer wired up. Use `project/`.
+
+## Quick start
+
+You need Python 3.12+, [uv](https://docs.astral.sh/uv/), Node and pnpm.
+
+1. **Set up the API.** Follow the one-time setup in [agent-api/README.md](agent-api/README.md) (Google Cloud OAuth, Supabase, `.env`).
+2. **Run the API:**
+   ```bash
+   cd agent-api
+   uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+   ```
+3. **Run the UI:**
+   ```bash
+   cd project
+   cp .env.example .env.local   # set AGENT_API_KEY, UI_PASSWORD, SESSION_SECRET
+   pnpm install
+   pnpm dev
+   ```
+4. Open http://localhost:3000, sign in, go to **Settings** and click **Connect Google**.
+
+`AGENT_API_KEY` must be the same value in both `.env` files.
+
+## Tests
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd agent-api && uv run pytest     # guardrail tests, no network or database
+cd project && pnpm lint && pnpm build
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Status
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Code is complete through the connect-your-systems phase. The Google connectors have not yet been piloted against real accounts.

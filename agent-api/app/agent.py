@@ -33,7 +33,8 @@ def _client() -> genai.Client:
         raise MissingKey("GEMINI_API_KEY is not set. Add it to agent-api/.env and restart the API.")
     # A hung call would hold the inbox lock forever; transient 429/5xx errors are retried with backoff.
     return genai.Client(api_key=key, http_options=types.HttpOptions(
-        timeout=int(os.getenv("GEMINI_TIMEOUT_MS", "60000")),
+        # The Gemini API rejects deadlines under 10 s (400 INVALID_ARGUMENT), so clamp a too-low env value.
+        timeout=max(10000, int(os.getenv("GEMINI_TIMEOUT_MS", "60000"))),
         retry_options=types.HttpRetryOptions(attempts=3, http_status_codes=[408, 429, 500, 502, 503, 504]),
     ))
 
