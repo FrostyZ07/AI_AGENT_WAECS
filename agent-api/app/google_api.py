@@ -122,26 +122,49 @@ def _header(payload: dict, name: str) -> str:
     return next((h["value"] for h in payload.get("headers", []) if h["name"].lower() == name.lower()), "")
 
 
+_VOID = {"br", "img", "hr", "meta", "link", "input", "wbr", "area", "base", "col", "embed", "source", "track"}
+_HIDDEN_TAGS = {"script", "style", "head", "title", "template", "noscript"}
+# Text a reader never sees is the usual carrier for prompt injection, so it never reaches the model.
+_HIDDEN_STYLE = re.compile(
+    r"display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0(?:\.0+)?(?:px|pt|em|rem|%)?\s*(?:;|!|$)"
+    r"|opacity\s*:\s*0(?:\.0+)?\s*(?:;|!|$)|max-height\s*:\s*0(?:px)?\s*(?:;|!|$)", re.I)
+_INVISIBLE_CHARS = re.compile("[​-‏‪-‮⁠-⁤﻿]")
+
+
 class _HtmlText(HTMLParser):
-    """Tiny HTML -> text converter for HTML-only mail (stdlib, no extra dependency)."""
+    """Tiny HTML -> text converter for HTML-only mail (stdlib, no extra dependency). Drops text hidden from the reader."""
 
     def __init__(self):
         super().__init__()
         self.out: list[str] = []
-        self._skip = 0
+        self._stack: list[tuple[str, bool]] = []  # (tag, hidden) for every open non-void element
+
+    def _hidden(self) -> bool:
+        return bool(self._stack) and self._stack[-1][1]
 
     def handle_starttag(self, tag, attrs):
-        if tag in ("script", "style"):
-            self._skip += 1
-        elif tag in ("br", "p", "div", "tr", "li"):
+        if tag in ("br", "p", "div", "tr", "li"):
+            self.out.append("\n")
+        if tag in _VOID:
+            return
+        a = {k.lower(): (v or "") for k, v in attrs}
+        hidden = (self._hidden() or tag in _HIDDEN_TAGS or "hidden" in a
+                  or a.get("aria-hidden", "").lower() == "true" or bool(_HIDDEN_STYLE.search(a.get("style", ""))))
+        self._stack.append((tag, hidden))
+
+    def handle_startendtag(self, tag, attrs):  # <div/>: opens and closes at once, so nothing to push
+        if tag in ("br", "p", "div", "tr", "li"):
             self.out.append("\n")
 
     def handle_endtag(self, tag):
-        if tag in ("script", "style") and self._skip:
-            self._skip -= 1
+        # Pop up to the matching open tag; a stray closing tag (broken HTML) is ignored.
+        for i in range(len(self._stack) - 1, -1, -1):
+            if self._stack[i][0] == tag:
+                del self._stack[i:]
+                return
 
     def handle_data(self, data):
-        if not self._skip:
+        if not self._hidden():
             self.out.append(data)
 
 
@@ -156,16 +179,19 @@ def _find_part(payload: dict, mime: str) -> str:
 
 
 def _text_body(payload: dict) -> str:
-    """Best-effort text extraction from a Gmail message payload: text/plain, else the HTML part with tags stripped."""
+    """Best-effort text extraction from a Gmail message payload: text/plain, else the HTML part with tags stripped.
+
+    Zero-width and bidi control characters are removed either way (they hide or disguise text).
+    """
     text = _find_part(payload, "text/plain")
-    if text:
-        return text
-    html = _find_part(payload, "text/html")
-    if not html:
-        return ""
-    parser = _HtmlText()
-    parser.feed(html)
-    return re.sub(r"\n\s*\n+", "\n\n", "".join(parser.out))
+    if not text:
+        html = _find_part(payload, "text/html")
+        if not html:
+            return ""
+        parser = _HtmlText()
+        parser.feed(html)
+        text = re.sub(r"\n\s*\n+", "\n\n", "".join(parser.out))
+    return _INVISIBLE_CHARS.sub("", text)
 
 
 def fetch_new_mail(max_results: int = 20) -> int:
