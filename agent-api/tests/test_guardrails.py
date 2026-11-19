@@ -1,7 +1,8 @@
 """Guardrail tests. No network, no database: store and google_api are replaced with in-memory fakes."""
 
 import base64
-from datetime import timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,6 +18,7 @@ SETTINGS = {
     "attendeeAllowDomains": [], "reminderMinutes": 15, "escalationAlerts": True,
 }
 OPEN = ("pending", "approving", "approved")
+NOW = datetime(2026, 11, 16, 8, 0, tzinfo=ZoneInfo("Asia/Kolkata"))  # a Monday, before working hours
 
 
 def req(id_, subject, body="hello", triage="routine", participants=None):
@@ -81,6 +83,7 @@ def fake(monkeypatch):
         key = {"reject_note": "rejectNote"}
         db["requests"][rid].update({key.get(k, k): v for k, v in f.items()})
 
+    monkeypatch.setattr(tools, "now", lambda: NOW)  # fixed clock: date/time guardrails are deterministic
     monkeypatch.setattr(main, "log", lambda *a, **k: None)
     for mod in (store, tools):
         monkeypatch.setattr(mod, "get_request", lambda rid: db["requests"].get(rid), raising=False)
@@ -295,6 +298,38 @@ def test_meeting_whose_date_passed_is_refused(fake, client, monkeypatch):
     monkeypatch.setattr(tools, "today", lambda: real_today + timedelta(days=3))
     assert client.post("/approvals/1", json={"status": "approved"}).status_code == 409
     assert fake["events"] == [] and fake["approvals"][0]["status"] == "pending"
+
+
+def _at(monkeypatch, hh, mm=0):
+    monkeypatch.setattr(tools, "now", lambda: NOW.replace(hour=hh, minute=mm))
+
+
+def test_past_slots_today_are_never_offered(fake, monkeypatch):
+    _at(monkeypatch, 15, 10)
+    slots = tools.find_free_slots(0, 30)["freeSlots"]
+    assert slots and slots[0]["start"] == "15:30"
+    assert all(s["start"] >= "15:30" for s in slots)
+    assert tools.find_free_slots(1, 30)["freeSlots"][0]["start"] == "09:00"  # tomorrow is unaffected
+
+
+def test_past_slot_today_cannot_be_proposed(fake, monkeypatch):
+    _at(monkeypatch, 15)
+    fake["requests"]["m"] = req("m", "Catch up", "today?")
+    assert "passed" in tools.propose_meeting("m", "Call", 0, "10:00", "10:30", [])["error"]
+    assert fake["approvals"] == []
+    assert tools.propose_meeting("m", "Call", 0, "16:00", "16:30", [])["ok"]
+
+
+def test_approving_a_meeting_whose_time_passed_is_refused(fake, client, monkeypatch):
+    fake["requests"]["m"] = req("m", "Catch up", "today?")
+    assert tools.propose_meeting("m", "Call", 0, "10:00", "10:30", [])["ok"]
+    _at(monkeypatch, 10, 5)  # the principal opens the card after the slot started
+    r = client.post("/approvals/1", json={"status": "approved"})
+    assert r.status_code == 409 and "passed" in r.json()["detail"]
+    assert fake["events"] == [] and fake["approvals"][0]["status"] == "pending"
+    # Moving it to a later time on the card makes it bookable again.
+    assert client.post("/approvals/1", json={"status": "approved", "start": "15:00", "end": "15:30"}).status_code == 200
+    assert len(fake["events"]) == 1
 
 
 # ---- leak guards ---------------------------------------------------------------------

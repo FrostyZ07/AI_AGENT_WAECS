@@ -233,6 +233,8 @@ def _apply_approved(a: dict, draft: str | None, attendees: list[str]) -> str | N
         day = (date.fromisoformat(a["meetingDate"]) - tools.today()).days if a.get("meetingDate") else a["day"]
         if day < 0:
             raise HTTPException(409, "This meeting's date has passed. Reject it and re-run the inbox.")
+        if tools.slot_start(day, a["start"]) < tools.now():  # a["start"] already holds the principal's edit, if any
+            raise HTTPException(409, "This time has already passed. Edit the time or reject it.")
         # Re-check against the live calendar: it may have changed since the proposal was made.
         for m in google_api.list_meetings(day, day):
             if not m["allDay"] and a["start"] < m["end"] and a["end"] > m["start"]:
