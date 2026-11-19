@@ -14,6 +14,7 @@ from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from html.parser import HTMLParser
 from zoneinfo import ZoneInfo
 
+import requests
 from google.auth.transport.requests import Request as GRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -97,6 +98,20 @@ def creds() -> Credentials:
         c.refresh(GRequest())
         store.save_token(json.loads(c.to_json()))
     return c
+
+
+def disconnect() -> None:
+    """Forget the stored Google token, after asking Google to revoke it (best effort: we delete it either way)."""
+    row = store.get_token()
+    if not row:
+        return
+    token = row["token"].get("refresh_token") or row["token"].get("token")
+    try:
+        requests.post("https://oauth2.googleapis.com/revoke", params={"token": token}, timeout=10)
+    except Exception:
+        pass
+    store.delete_token()
+    store.log("google_disconnected", email=row["email"])
 
 
 def status() -> dict:

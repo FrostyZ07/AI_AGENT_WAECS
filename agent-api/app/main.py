@@ -384,6 +384,12 @@ def google_start():
     return {"url": _run(google_api.auth_url)}
 
 
+@api.post("/oauth/google/disconnect")
+def google_disconnect():
+    _run(google_api.disconnect)
+    return {"ok": True}
+
+
 @app.get("/oauth/google/callback")  # reached by Google's redirect, so no key; the PKCE state ties it to a start call
 def google_callback(code: str | None = None, state: str | None = None, error: str | None = None):
     if error or not code or not state:

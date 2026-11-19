@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Clock3, Filter, Link2 } from 'lucide-react'
-import { saveSettingsAction } from '@/app/actions'
+import { disconnectGoogleAction, saveSettingsAction } from '@/app/actions'
 import { linkButtonClass } from '@/components/action-button'
 import { Panel, Pill, SectionHeading } from '@/components/dashboard'
 import type { Settings, State } from '@/lib/api'
@@ -40,6 +40,7 @@ export default function SettingsForm({
     setWorkingDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d].sort((a, b) => a - b)))
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null)
   const [saving, setSaving] = useState(false)
+  const [disconnecting, setDisconnecting] = useState(false)
 
   const lines = (s: string, sep: RegExp) => s.split(sep).map((x) => x.trim()).filter(Boolean)
 
@@ -82,9 +83,27 @@ export default function SettingsForm({
               'Connect Google to read mail and manage your calendar.'
             )}
           </p>
-          <a href={connectUrl} className={linkButtonClass(google.connected ? 'secondary' : 'primary')}>
-            {google.connected ? 'Reconnect' : 'Connect Google'}
-          </a>
+          <div className="flex items-center gap-2">
+            <a href={connectUrl} className={linkButtonClass(google.connected ? 'secondary' : 'primary')}>
+              {google.connected ? 'Reconnect' : 'Connect Google'}
+            </a>
+            {google.connected && (
+              <button
+                type="button"
+                disabled={disconnecting}
+                className={linkButtonClass('secondary')}
+                onClick={async () => {
+                  if (!window.confirm('Disconnect Google? The assistant will stop reading mail and managing your calendar until you reconnect.')) return
+                  setDisconnecting(true)
+                  const err = await disconnectGoogleAction()
+                  setDisconnecting(false)
+                  setStatus(err ? { ok: false, text: err } : { ok: true, text: 'Google disconnected.' })
+                }}
+              >
+                {disconnecting ? 'Disconnecting…' : 'Disconnect'}
+              </button>
+            )}
+          </div>
         </div>
         <p className="mt-3 text-[12px] text-[#655e57] dark:text-zinc-400">
           Meeting prep reads (never changes) your Google Drive. If you connected before Drive access was added, click Reconnect once and approve it.

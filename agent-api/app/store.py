@@ -224,6 +224,10 @@ def save_token(token: dict, email: str | None = None) -> None:
        (json.dumps(token), email), write=True)
 
 
+def delete_token() -> None:
+    _q("DELETE FROM oauth_token WHERE id = 1", write=True)
+
+
 def log(event: str, **details) -> None:
     _q("INSERT INTO audit_log (event, details) VALUES (%s, %s)", (event, json.dumps(details, default=str)), write=True)
 
