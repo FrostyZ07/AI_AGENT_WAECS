@@ -25,7 +25,7 @@ export default async function ApprovalsPage() {
         }
       />
 
-      <div className="max-w-3xl space-y-3">
+      <div className="max-w-3xl space-y-4">
         {approvals.length === 0 && <EmptyState message='Nothing yet. Run "Process inbox" on the Calendar & Requests page.' />}
         {approvals.map((a) => (
           // key includes the status so the card's local edit state resets once it is decided

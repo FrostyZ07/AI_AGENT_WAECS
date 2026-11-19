@@ -10,7 +10,7 @@ export default function Brand({ size = 'md' }: { size?: 'sm' | 'md' }) {
       >
         <BriefcaseBusiness aria-hidden="true" className={sm ? 'size-4' : 'size-[18px]'} strokeWidth={1.8} />
       </span>
-      <span className="font-[family-name:var(--font-brand)] text-[19px] leading-none tracking-tight">Executive Assistant</span>
+      <span className="font-[family-name:var(--font-brand)] text-[21px] italic leading-none tracking-tight">Executive Assistant</span>
     </span>
   )
 }

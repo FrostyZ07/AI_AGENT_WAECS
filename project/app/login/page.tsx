@@ -6,7 +6,7 @@ import Brand from '@/components/brand'
 import { linkButtonClass } from '@/components/action-button'
 
 const input =
-  'w-full rounded-lg border border-[#e4dac6] bg-[#fcfaf5] px-3 py-2 text-[13px] outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:focus:border-indigo-400'
+  'w-full rounded-lg border border-[#e4dac6] bg-[#fcfaf5] px-3 py-2 text-[14px] outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:focus:border-indigo-400'
 
 export default function LoginPage() {
   const [error, formAction, pending] = useActionState(loginAction, null)
@@ -18,14 +18,14 @@ export default function LoginPage() {
       >
         <div className="space-y-2">
           <h1><Brand /></h1>
-          <p className="text-[11px] text-stone-500 dark:text-zinc-400">Sign in to review approvals</p>
+          <p className="text-[12px] text-[#655e57] dark:text-zinc-400">Sign in to review approvals</p>
         </div>
-        <label className="block space-y-1.5 text-[12px] font-medium text-teal-900 dark:text-zinc-200">
+        <label className="block space-y-1.5 text-[13px] font-medium text-teal-900 dark:text-zinc-200">
           Password
           <input name="password" type="password" autoComplete="current-password" required autoFocus className={input} />
         </label>
         {error && (
-          <p role="alert" className="text-[12px] text-red-600 dark:text-red-400">
+          <p role="alert" className="text-[13px] text-red-600 dark:text-red-400">
             {error}
           </p>
         )}

@@ -46,8 +46,8 @@ export default async function CalendarPage() {
                     <Pill>{r.kind}</Pill>
                     {!r.processed && <Pill tone="accent">new</Pill>}
                   </div>
-                  <h3 className="mt-2 text-[13px] font-medium leading-5 text-teal-900 dark:text-zinc-100">{r.subject}</h3>
-                  <p className="mt-1 text-[11px] text-stone-500 dark:text-zinc-400">
+                  <h3 className="mt-2 text-[14px] font-medium leading-5 text-teal-900 dark:text-zinc-100">{r.subject}</h3>
+                  <p className="mt-1 text-[12px] text-[#655e57] dark:text-zinc-400">
                     {r.from} <span className="px-1 text-stone-400 dark:text-zinc-600">·</span> {r.receivedOn ? `${r.receivedOn} ` : ''}{r.receivedAt}
                   </p>
                 </li>
@@ -64,16 +64,16 @@ export default async function CalendarPage() {
             <div className="mt-4 space-y-6">
               {days.map((d) => (
                 <div key={d}>
-                  <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-zinc-500">{dayLabel(d)}</h3>
+                  <h3 className="mb-2 font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-[#655e57] dark:text-zinc-500">{dayLabel(d)}</h3>
                   <ul className="divide-y divide-[#ece5d6] dark:divide-zinc-800">
                     {meetings
                       .filter((m) => m.day === d)
                       .sort((a, b) => a.start.localeCompare(b.start))
                       .map((m) => (
                         <li key={m.id} className="flex gap-4 py-3 first:pt-0 last:pb-0">
-                          <div className="w-[76px] shrink-0 pt-0.5 font-mono text-[11px] leading-5 tabular-nums text-stone-500 dark:text-zinc-400">
+                          <div className="w-[76px] shrink-0 pt-0.5 font-mono text-[12px] leading-5 tabular-nums text-[#655e57] dark:text-zinc-400">
                             {m.allDay ? (
-                              <span className="font-sans text-[11px] font-medium">All day</span>
+                              <span className="font-sans text-[12px] font-medium">All day</span>
                             ) : (
                               <>
                                 <span className="block text-teal-900 dark:text-zinc-200">{formatTime(m.start)}</span>
@@ -82,7 +82,7 @@ export default async function CalendarPage() {
                             )}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <h4 className="text-[13px] font-medium leading-5 text-teal-900 dark:text-zinc-100">{m.title}</h4>
+                            <h4 className="text-[14px] font-medium leading-5 text-teal-900 dark:text-zinc-100">{m.title}</h4>
                             <MeetingPrep m={m} />
                           </div>
                         </li>

@@ -8,9 +8,9 @@ import { Panel, Pill, SectionHeading } from '@/components/dashboard'
 import type { Settings, State } from '@/lib/api'
 
 const input =
-  'w-full rounded-lg border border-[#e4dac6] bg-[#fcfaf5] px-3 py-2 text-[13px] outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:focus:border-indigo-400'
-const label = 'block space-y-1.5 text-[12px] font-medium text-teal-900 dark:text-zinc-200'
-const hint = 'block text-[11px] font-normal text-stone-500 dark:text-zinc-400'
+  'w-full rounded-lg border border-[#e4dac6] bg-[#fcfaf5] px-3 py-2 text-[14px] outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:focus:border-indigo-400'
+const label = 'block space-y-1.5 text-[13px] font-medium text-teal-900 dark:text-zinc-200'
+const hint = 'block text-[12px] font-normal text-[#655e57] dark:text-zinc-400'
 
 export default function SettingsForm({
   initial,
@@ -66,7 +66,7 @@ export default function SettingsForm({
           {google.connected ? <Pill tone="success">Connected</Pill> : <Pill tone="warning">Not connected</Pill>}
         </div>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-[13px] text-stone-500 dark:text-zinc-400">
+          <p className="text-[14px] text-[#655e57] dark:text-zinc-400">
             {google.connected ? (
               <>
                 Signed in as <span className="font-medium text-teal-900 dark:text-zinc-100">{google.email}</span>
@@ -79,10 +79,10 @@ export default function SettingsForm({
             {google.connected ? 'Reconnect' : 'Connect Google'}
           </a>
         </div>
-        <p className="mt-3 text-[11px] text-stone-500 dark:text-zinc-400">
+        <p className="mt-3 text-[12px] text-[#655e57] dark:text-zinc-400">
           Meeting prep reads (never changes) your Google Drive. If you connected before Drive access was added, click Reconnect once and approve it.
         </p>
-        {notice && <p className="mt-3 text-[13px] text-stone-700 dark:text-zinc-300">{notice}</p>}
+        {notice && <p className="mt-3 text-[14px] text-stone-700 dark:text-zinc-300">{notice}</p>}
       </Panel>
 
       <Panel aria-labelledby="time-heading">
@@ -136,7 +136,7 @@ export default function SettingsForm({
             </span>
             <input value={domains} onChange={(e) => setDomains(e.target.value)} className={input} placeholder="mycompany.com" />
           </label>
-          <label className="flex items-start gap-3 text-[12px] font-medium text-teal-900 dark:text-zinc-200">
+          <label className="flex items-start gap-3 text-[13px] font-medium text-teal-900 dark:text-zinc-200">
             <input type="checkbox" checked={alerts} onChange={(e) => setAlerts(e.target.checked)} className="mt-0.5 size-4 accent-teal-600" />
             <span>
               Email me straight away when something needs my sign-off
@@ -151,7 +151,7 @@ export default function SettingsForm({
           {saving ? 'Saving…' : 'Save changes'}
         </button>
         {status && (
-          <span role="status" className={`text-[13px] ${status.ok ? 'text-green-700 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+          <span role="status" className={`text-[14px] ${status.ok ? 'text-teal-800 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
             {status.text}
           </span>
         )}

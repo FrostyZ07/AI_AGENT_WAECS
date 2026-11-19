@@ -130,12 +130,14 @@ def release_approval(approval_id: str) -> None:
 
 
 def finish_approval(approval_id: str, google_ref: str | None = None, draft: str | None = None,
-                    attendees: list[str] | None = None, edited: bool = False) -> None:
-    """The side effect happened: record it. `draft`/`attendees` are what was actually sent or booked."""
+                    attendees: list[str] | None = None, edited: bool = False,
+                    start: str | None = None, end: str | None = None) -> None:
+    """The side effect happened: record it. `draft`/`attendees`/`start`/`end` are what was actually sent or booked."""
     _q(
         "UPDATE approvals SET status = 'approved', decided_at = now(), google_ref = COALESCE(%s, google_ref), "
-        "draft = COALESCE(%s, draft), attendees = COALESCE(%s::jsonb, attendees), edited = %s WHERE id = %s",
-        (google_ref, draft, json.dumps(attendees) if attendees is not None else None, edited, int(approval_id)),
+        "draft = COALESCE(%s, draft), attendees = COALESCE(%s::jsonb, attendees), edited = %s, "
+        "start = COALESCE(%s, start), \"end\" = COALESCE(%s, \"end\") WHERE id = %s",
+        (google_ref, draft, json.dumps(attendees) if attendees is not None else None, edited, start, end, int(approval_id)),
         write=True,
     )
 

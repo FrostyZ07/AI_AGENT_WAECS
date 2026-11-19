@@ -4,7 +4,7 @@ import {
   CalendarCheck,
   CalendarDays,
   ChevronRight,
-  CircleDollarSign,
+  IndianRupee,
   FileText,
   Inbox,
   ListChecks,
@@ -58,14 +58,14 @@ export default async function BriefPage() {
           className="group rounded-xl border border-teal-200 bg-teal-50/70 p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition hover:border-teal-300 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 dark:border-indigo-400/30 dark:bg-indigo-400/[0.07] dark:hover:border-indigo-300/50"
         >
           <div className="mb-4 flex items-center justify-between">
-            <span className="text-[12px] font-medium text-teal-800 dark:text-indigo-200">Awaiting approval</span>
+            <span className="text-[13px] font-medium text-teal-800 dark:text-indigo-200">Awaiting approval</span>
             <span className="grid size-8 place-items-center rounded-lg bg-[#fcfaf5]/80 text-teal-700 dark:bg-indigo-300/10 dark:text-indigo-300">
               <Inbox aria-hidden="true" className="size-4" />
             </span>
           </div>
           <div className="flex items-baseline justify-between">
-            <span className="text-[29px] font-semibold leading-none tracking-[-0.05em] tabular-nums text-teal-950 dark:text-indigo-100">{pendingApprovals.length}</span>
-            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-teal-700 group-hover:underline dark:text-indigo-300">
+            <span className="font-heading text-[32px] font-medium leading-none tracking-tight tabular-nums text-teal-950 dark:text-indigo-100">{pendingApprovals.length}</span>
+            <span className="inline-flex items-center gap-1 text-[12px] font-medium text-teal-700 group-hover:underline dark:text-indigo-300">
               Review queue <ArrowUpRight aria-hidden="true" className="size-3" />
             </span>
           </div>
@@ -74,7 +74,7 @@ export default async function BriefPage() {
 
       {kpis && (
         <section aria-labelledby="kpi-heading" className="mb-6">
-          <h2 id="kpi-heading" className="mb-3 text-[12px] font-semibold text-teal-900 dark:text-zinc-200">
+          <h2 id="kpi-heading" className="mb-3 font-heading text-[16px] font-medium text-teal-900 dark:text-zinc-200">
             Last {kpis.days} days
           </h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -101,12 +101,12 @@ export default async function BriefPage() {
           <span className="grid size-7 place-items-center rounded-lg bg-teal-50 text-teal-700 dark:bg-indigo-400/10 dark:text-indigo-300">
             <FileText aria-hidden="true" className="size-3.5" />
           </span>
-          <h2 id="assistant-brief" className="text-sm font-semibold tracking-tight">Assistant&apos;s brief</h2>
+          <h2 id="assistant-brief" className="font-heading text-[18px] font-medium tracking-tight">Assistant&apos;s brief</h2>
         </div>
         {brief ? (
           <>
-            <p className="max-w-[860px] whitespace-pre-wrap text-[13px] leading-6 text-stone-700 dark:text-zinc-300">{brief.text}</p>
-            <p className="mt-3 text-[11px] text-stone-500 dark:text-zinc-500">Generated {brief.generatedAt.replace('T', ' ')}</p>
+            <p className="max-w-[760px] whitespace-pre-wrap font-reading text-[17px] leading-[1.65] text-stone-700 dark:text-zinc-300">{brief.text}</p>
+            <p className="mt-3 text-[12px] text-[#655e57] dark:text-zinc-500">Generated {brief.generatedAt.replace('T', ' ')}</p>
           </>
         ) : (
           <EmptyState message="Generate your brief to see a summary of today." />
@@ -120,9 +120,9 @@ export default async function BriefPage() {
             <ol className="mt-4 divide-y divide-[#ece5d6] dark:divide-zinc-800">
               {today.map((m) => (
                 <li key={m.id} className="flex gap-4 py-4 first:pt-0 last:pb-0">
-                  <div className="w-[76px] shrink-0 pt-0.5 font-mono text-[11px] leading-5 tabular-nums text-stone-500 dark:text-zinc-400">
+                  <div className="w-[76px] shrink-0 pt-0.5 font-mono text-[12px] leading-5 tabular-nums text-[#655e57] dark:text-zinc-400">
                     {m.allDay ? (
-                      <span className="font-sans text-[11px] font-medium">All day</span>
+                      <span className="font-sans text-[12px] font-medium">All day</span>
                     ) : (
                       <>
                         <span className="block text-teal-900 dark:text-zinc-200">{formatTime(m.start)}</span>
@@ -131,9 +131,9 @@ export default async function BriefPage() {
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <h3 className="text-[13px] font-medium leading-5 text-teal-900 dark:text-zinc-100">{m.title}</h3>
+                    <h3 className="text-[14px] font-medium leading-5 text-teal-900 dark:text-zinc-100">{m.title}</h3>
                     {m.attendees.length > 0 && (
-                      <p className="mt-1 flex items-center gap-1.5 text-[11px] text-stone-500 dark:text-zinc-400">
+                      <p className="mt-1 flex items-center gap-1.5 text-[12px] text-[#655e57] dark:text-zinc-400">
                         <Users aria-hidden="true" className="size-3" />
                         {m.attendees.join(', ')}
                       </p>
@@ -160,8 +160,8 @@ export default async function BriefPage() {
                     className={`mt-[6px] size-2 shrink-0 rounded-full ring-4 ${f.overdue ? 'bg-red-500 ring-red-50 dark:bg-red-400 dark:ring-red-400/10' : 'bg-teal-500 ring-teal-50 dark:bg-indigo-400 dark:ring-indigo-400/10'}`}
                   />
                   <div className="min-w-0 flex-1">
-                    <h3 className="text-[13px] font-medium leading-5 text-teal-900 dark:text-zinc-100">{f.task}</h3>
-                    <p className="mt-1 text-[11px] text-stone-500 dark:text-zinc-400">
+                    <h3 className="text-[14px] font-medium leading-5 text-teal-900 dark:text-zinc-100">{f.task}</h3>
+                    <p className="mt-1 text-[12px] text-[#655e57] dark:text-zinc-400">
                       {f.owner} <span className="px-1 text-stone-400 dark:text-zinc-600">·</span>{' '}
                       {f.overdue ? <span className="font-medium text-red-600 dark:text-red-400">Overdue, due {f.due}</span> : <>Due {f.due}</>}
                     </p>
@@ -176,8 +176,8 @@ export default async function BriefPage() {
 
           <div className="mt-6 border-t border-[#ece5d6] pt-5 dark:border-zinc-800">
             <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-[12px] font-semibold text-teal-900 dark:text-zinc-200">Needs your approval</h3>
-              <Link href="/approvals" className="text-[11px] font-medium text-teal-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 dark:text-indigo-400">
+              <h3 className="text-[13px] font-semibold text-teal-900 dark:text-zinc-200">Needs your approval</h3>
+              <Link href="/approvals" className="inline-flex min-h-6 items-center text-[13px] font-medium text-teal-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 dark:text-indigo-400">
                 View all
               </Link>
             </div>
@@ -188,13 +188,13 @@ export default async function BriefPage() {
                   return (
                     <li key={a.id} className="flex items-start gap-3 rounded-lg border border-[#e4dac6]/80 px-3 py-3 dark:border-zinc-800">
                       <span className={`mt-0.5 grid size-7 shrink-0 place-items-center rounded-md ${flagged ? iconTile.danger : iconTile.info}`}>
-                        {a.type === 'payment' ? <CircleDollarSign aria-hidden="true" className="size-4" /> : <Mail aria-hidden="true" className="size-4" />}
+                        {a.type === 'payment' ? <IndianRupee aria-hidden="true" className="size-4" /> : <Mail aria-hidden="true" className="size-4" />}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="text-[12px] font-medium leading-5 text-teal-900 dark:text-zinc-200">{a.summary}</p>
+                        <p className="text-[13px] font-medium leading-5 text-teal-900 dark:text-zinc-200">{a.summary}</p>
                         <span className="mt-1 inline-block"><Pill tone={flagged ? 'danger' : 'info'}>{a.type} · Pending</Pill></span>
                       </div>
-                      <ArrowUpRight aria-hidden="true" className="mt-1 size-3.5 shrink-0 text-stone-500" />
+                      <ArrowUpRight aria-hidden="true" className="mt-1 size-3.5 shrink-0 text-[#655e57]" />
                     </li>
                   )
                 })}

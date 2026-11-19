@@ -25,7 +25,7 @@ export async function generateBriefAction() {
 export async function decideApprovalAction(
   id: string,
   status: "approved" | "rejected",
-  edits?: { draft?: string; attendees?: string[]; note?: string },
+  edits?: { draft?: string; attendees?: string[]; note?: string; start?: string; end?: string },
 ) {
   return run(`/approvals/${encodeURIComponent(id)}`, "POST", { status, ...edits });
 }

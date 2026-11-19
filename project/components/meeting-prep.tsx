@@ -21,14 +21,14 @@ export default function MeetingPrep({ m }: { m: Meeting }) {
                   href={d.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 dark:bg-blue-400/10 dark:text-blue-300"
+                  className="inline-flex items-center gap-1 min-h-6 rounded-md bg-[#e3efeb] px-2 py-1 text-[12px] font-medium text-teal-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 dark:bg-blue-400/10 dark:text-blue-300"
                 >
                   {d.name}
                   <ExternalLink aria-hidden="true" className="size-3" />
                 </a>
               </li>
             ) : (
-              <li key={d.id} className="rounded-md bg-[#efe8d9] px-2 py-1 text-[11px] text-stone-600 dark:bg-zinc-800 dark:text-zinc-400">
+              <li key={d.id} className="rounded-md bg-[#efe8d9] px-2 py-1 text-[12px] text-stone-600 dark:bg-zinc-800 dark:text-zinc-400">
                 {d.name}
               </li>
             ),

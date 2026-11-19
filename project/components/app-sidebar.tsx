@@ -32,12 +32,12 @@ export default function AppSidebar({ pendingApprovals }: { pendingApprovals: num
                 key={href}
                 href={href}
                 aria-current={isActive ? 'page' : undefined}
-                className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 ${isActive ? active : 'text-stone-600 hover:bg-[#efe8d9] hover:text-teal-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100'}`}
+                className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 font-nav text-[14px] font-medium tracking-[0.01em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 ${isActive ? active : 'text-stone-600 hover:bg-[#efe8d9] hover:text-teal-900 dark:text-zinc-400 dark:hover:bg-zinc-800/70 dark:hover:text-zinc-100'}`}
               >
                 <Icon aria-hidden="true" className="size-[17px]" strokeWidth={1.8} />
                 {label}
                 {href === '/approvals' && pendingApprovals > 0 && (
-                  <span className="ml-auto rounded-md bg-[#fcfaf5] px-1.5 py-0.5 text-[11px] tabular-nums text-stone-600 ring-1 ring-[#e4dac6] dark:bg-zinc-900 dark:text-zinc-300 dark:ring-zinc-700">
+                  <span className="ml-auto rounded-md bg-[#fcfaf5] px-1.5 py-0.5 text-[12px] tabular-nums text-stone-600 ring-1 ring-[#e4dac6] dark:bg-zinc-900 dark:text-zinc-300 dark:ring-zinc-700">
                     {pendingApprovals}
                   </span>
                 )}
@@ -50,11 +50,11 @@ export default function AppSidebar({ pendingApprovals }: { pendingApprovals: num
             <Sparkles aria-hidden="true" className="size-3.5 text-teal-700 dark:text-indigo-400" />
             Always in control
           </div>
-          <p className="text-[11px] leading-relaxed text-stone-500 dark:text-zinc-400">Nothing is sent or paid without your approval.</p>
+          <p className="text-[12px] leading-relaxed text-[#655e57] dark:text-zinc-400">Nothing is sent or paid without your approval.</p>
           <form action={logoutAction} className="mt-3 border-t border-[#e4dac6] pt-3 dark:border-zinc-800">
             <button
               type="submit"
-              className="flex items-center gap-2 rounded-md text-[11px] font-medium text-stone-600 hover:text-teal-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 dark:text-zinc-400 dark:hover:text-zinc-100"
+              className="flex min-h-8 items-center gap-2 rounded-md text-[13px] font-medium text-stone-600 hover:text-teal-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 dark:text-zinc-400 dark:hover:text-zinc-100"
             >
               <LogOut aria-hidden="true" className="size-3.5" /> Sign out
             </button>
@@ -74,7 +74,7 @@ export default function AppSidebar({ pendingApprovals }: { pendingApprovals: num
                 key={href}
                 href={href}
                 aria-current={isActive ? 'page' : undefined}
-                className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 ${isActive ? active : 'text-stone-600 hover:bg-[#efe8d9] dark:text-zinc-400 dark:hover:bg-zinc-800'}`}
+                className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 font-nav text-[14px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 ${isActive ? active : 'text-stone-600 hover:bg-[#efe8d9] dark:text-zinc-400 dark:hover:bg-zinc-800'}`}
               >
                 <Icon aria-hidden="true" className="size-3.5" />
                 {label}

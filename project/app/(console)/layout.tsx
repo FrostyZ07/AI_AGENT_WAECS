@@ -12,7 +12,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
       <main className="mx-auto min-h-screen max-w-[1320px] px-4 py-8 sm:px-7 sm:py-10 md:ml-[248px] md:px-10 lg:px-12">
         <div className="mx-auto max-w-[1080px]">
           {children}
-          <div className="mt-6 flex items-center gap-2 text-[11px] text-stone-500 dark:text-zinc-500">
+          <div className="mt-6 flex items-center gap-2 text-[12px] text-[#655e57] dark:text-zinc-500">
             <Clock3 aria-hidden="true" className="size-3.5" /> Your assistant prepares actions for review. Nothing is sent without your approval.
           </div>
         </div>

@@ -16,7 +16,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
   if (!data) return <ErrorNotice>{error}</ErrorNotice>
 
   const chip = (active: boolean) =>
-    `rounded-md px-2 py-1 text-[11px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 ${
+    `rounded-md px-2 py-1 text-[12px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 ${
       active
         ? 'bg-teal-700 text-white dark:bg-indigo-500'
         : 'bg-[#efe8d9] text-stone-600 hover:bg-[#e6dcc8] dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700'
@@ -42,9 +42,9 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
           <EmptyState message="No entries yet." />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-[12px]">
+            <table className="w-full text-left text-[13px]">
               <thead>
-                <tr className="text-[10px] font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-zinc-500">
+                <tr className="font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-[#655e57] dark:text-zinc-500">
                   <th className="py-2 pr-4 font-semibold">Time</th>
                   <th className="py-2 pr-4 font-semibold">Event</th>
                   <th className="py-2 font-semibold">Details</th>
@@ -53,9 +53,9 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
               <tbody className="divide-y divide-[#ece5d6] dark:divide-zinc-800">
                 {data.entries.map((e) => (
                   <tr key={e.id} className="align-top">
-                    <td className="whitespace-nowrap py-2.5 pr-4 font-mono text-[11px] tabular-nums text-stone-500 dark:text-zinc-400">{e.at}</td>
+                    <td className="whitespace-nowrap py-2.5 pr-4 font-mono text-[12px] tabular-nums text-[#655e57] dark:text-zinc-400">{e.at}</td>
                     <td className="whitespace-nowrap py-2.5 pr-4 font-medium text-teal-900 dark:text-zinc-100">{e.event}</td>
-                    <td className="break-all py-2.5 font-mono text-[11px] text-stone-500 dark:text-zinc-400">{preview(e.details)}</td>
+                    <td className="break-all py-2.5 font-mono text-[12px] text-[#655e57] dark:text-zinc-400">{preview(e.details)}</td>
                   </tr>
                 ))}
               </tbody>

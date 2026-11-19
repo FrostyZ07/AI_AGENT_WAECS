@@ -56,9 +56,13 @@ def fake(monkeypatch):
         if get(aid)["status"] == "approving":
             get(aid)["status"] = "pending"
 
-    def finish(aid, google_ref=None, draft=None, attendees=None, edited=False):
+    def finish(aid, google_ref=None, draft=None, attendees=None, edited=False, start=None, end=None):
         a = get(aid)
         a.update(status="approved", edited=edited)
+        if start:
+            a["start"] = start
+        if end:
+            a["end"] = end
         if google_ref:
             a["googleRef"] = google_ref
         if draft is not None:

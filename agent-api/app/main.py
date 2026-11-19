@@ -80,6 +80,8 @@ class Decision(BaseModel):
     draft: str | None = None            # edited reply text (approve only)
     attendees: list[str] | None = None  # edited invite list (approve only)
     note: str | None = None             # reason, when rejecting: the agent re-drafts with it
+    start: str | None = None            # edited meeting start "HH:MM" (approve only)
+    end: str | None = None              # edited meeting end "HH:MM" (approve only)
 
 
 _HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -252,6 +254,14 @@ def _resolve_edits(a: dict, body: Decision) -> tuple[str | None, list[str], bool
         if new != (a["draft"] or "").strip():
             draft, edited = new, True
     elif a["type"] == "meeting":
+        if body.start is not None or body.end is not None:
+            s, e = body.start or a["start"], body.end or a["end"]
+            if not (_HHMM.match(s) and _HHMM.match(e)):
+                raise HTTPException(422, "Times must look like 09:30.")
+            if s >= e:
+                raise HTTPException(422, "The meeting must start before it ends.")
+            if (s, e) != (a["start"], a["end"]):
+                a["start"], a["end"], edited = s, e, True  # the principal chose this time, so working hours do not apply
         if body.attendees is not None:
             new = [x.strip() for x in body.attendees if x.strip()][:20]
             for x in new:
@@ -302,6 +312,8 @@ def decide(approval_id: str, body: Decision):
         approval_id, ref,
         draft=draft if edited and a["type"] == "reply" else None,
         attendees=attendees if edited and a["type"] == "meeting" else None,
+        start=a["start"] if a["type"] == "meeting" else None,
+        end=a["end"] if a["type"] == "meeting" else None,
         edited=edited,
     )
     log("approval_decided", approvalId=approval_id, status="approved", googleRef=ref, edited=edited,

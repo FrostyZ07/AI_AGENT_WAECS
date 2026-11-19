@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { CalendarDays, CircleDollarSign, Mail, Plane, ShieldAlert, X, type LucideIcon } from 'lucide-react'
+import { CalendarDays, IndianRupee, Mail, Plane, ShieldAlert, X, type LucideIcon } from 'lucide-react'
 import { decideApprovalAction } from '@/app/actions'
 import { linkButtonClass } from '@/components/action-button'
 import { NoteBox, Pill, iconTile, panel } from '@/components/dashboard'
@@ -10,7 +10,7 @@ import type { Approval, ApprovalType } from '@/lib/types'
 
 const flagged: ApprovalType[] = ['payment', 'travel', 'sensitive']
 const typeIcon: Record<ApprovalType, LucideIcon> = {
-  payment: CircleDollarSign,
+  payment: IndianRupee,
   travel: Plane,
   sensitive: ShieldAlert,
   reply: Mail,
@@ -18,7 +18,7 @@ const typeIcon: Record<ApprovalType, LucideIcon> = {
 }
 const statusTone = { pending: 'warning', approving: 'warning', approved: 'success', rejected: 'neutral' } as const
 const field =
-  'w-full rounded-lg border border-[#e4dac6] bg-[#fcfaf5] px-3 py-2 text-[13px] outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:focus:border-indigo-400'
+  'w-full rounded-lg border border-[#e4dac6] bg-[#fcfaf5] px-3 py-2 text-[14px] outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:focus:border-indigo-400'
 
 export default function ApprovalCard({ a }: { a: Approval }) {
   const isFlagged = flagged.includes(a.type)
@@ -27,6 +27,8 @@ export default function ApprovalCard({ a }: { a: Approval }) {
 
   const [draft, setDraft] = useState(a.draft ?? '')
   const [attendees, setAttendees] = useState<string[]>(a.attendees ?? [])
+  const [startTime, setStartTime] = useState(a.start ?? '')
+  const [endTime, setEndTime] = useState(a.end ?? '')
   const [newGuest, setNewGuest] = useState('')
   const [rejecting, setRejecting] = useState(false)
   const [note, setNote] = useState('')
@@ -51,7 +53,7 @@ export default function ApprovalCard({ a }: { a: Approval }) {
           : a.type === 'reply'
             ? { draft }
             : a.type === 'meeting'
-              ? { attendees: guests }
+              ? { attendees: guests, start: startTime, end: endTime }
               : undefined
       const err = await decideApprovalAction(a.id, status, edits)
       if (err) setError(err)
@@ -59,7 +61,7 @@ export default function ApprovalCard({ a }: { a: Approval }) {
   }
 
   return (
-    <article className={`${panel} ${isFlagged ? 'border-l-4 border-l-red-500 dark:border-l-red-400' : ''} ${!open ? 'opacity-70' : ''}`}>
+    <article className={`${panel} min-w-0 ${isFlagged ? 'border-l-4 border-l-red-500 dark:border-l-red-400' : ''} ${!open ? 'opacity-70' : ''}`}>
       <div className="flex items-start gap-3">
         <span className={`mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg ${isFlagged ? iconTile.danger : iconTile.info}`}>
           <Icon aria-hidden="true" className="size-4" />
@@ -70,17 +72,17 @@ export default function ApprovalCard({ a }: { a: Approval }) {
             <Pill tone={statusTone[a.status]}>{a.status}</Pill>
             {a.edited && <Pill tone="accent">edited by you</Pill>}
           </div>
-          <h3 className="mt-2 text-[13px] font-medium leading-5 text-teal-900 dark:text-zinc-100">{a.summary}</h3>
+          <h3 className="mt-2 text-[14px] font-medium leading-5 wrap-anywhere text-teal-900 dark:text-zinc-100">{a.summary}</h3>
 
           {a.status === 'approving' && (
-            <p role="status" className="mt-2 text-[12px] text-amber-700 dark:text-amber-300">
+            <p role="status" className="mt-2 text-[13px] text-amber-700 dark:text-amber-300">
               This is being sent or booked, or was interrupted. Check Gmail or Calendar before doing anything: it will not be sent again.
             </p>
           )}
-          {a.decisionNote && <p className="mt-2 text-[12px] text-stone-500 dark:text-zinc-400">Your reason: {a.decisionNote}</p>}
+          {a.decisionNote && <p className="mt-2 text-[13px] text-[#655e57] dark:text-zinc-400">Your reason: {a.decisionNote}</p>}
 
           {a.from && (
-            <details className="group mt-3 rounded-lg border border-[#ece5d6] px-3 py-2 text-[12px] dark:border-zinc-800">
+            <details className="group mt-3 min-w-0 rounded-lg wrap-anywhere border border-[#ece5d6] px-3 py-2 text-[13px] dark:border-zinc-800">
               <summary className="cursor-pointer select-none text-stone-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 dark:text-zinc-400">
                 Original email from <span className="font-medium text-teal-900 dark:text-zinc-200">{a.from}</span>
                 {a.receivedAt ? ` · ${a.receivedAt}` : ''}
@@ -93,25 +95,37 @@ export default function ApprovalCard({ a }: { a: Approval }) {
 
           {a.type === 'meeting' && (
             <div className="mt-3 space-y-2">
-              <p className="text-[12px] text-stone-600 dark:text-zinc-400">
+              <p className="text-[13px] text-stone-600 dark:text-zinc-400">
                 <span className="font-medium text-teal-900 dark:text-zinc-200">{a.meetingDate ?? `In ${a.day} days`}</span>
-                {a.start && a.end ? ` · ${formatTime(a.start)} to ${formatTime(a.end)}` : ''}
+                {!open && a.start && a.end ? ` · ${formatTime(a.start)} to ${formatTime(a.end)}` : ''}
               </p>
+              {open && (
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="block font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-[#655e57] dark:text-zinc-500">
+                    Start
+                    <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className={`${field} mt-1 w-auto`} />
+                  </label>
+                  <label className="block font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-[#655e57] dark:text-zinc-500">
+                    End
+                    <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className={`${field} mt-1 w-auto`} />
+                  </label>
+                </div>
+              )}
               <div>
-                <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-zinc-500">
+                <span className="mb-1 block font-mono text-[11px] font-medium uppercase tracking-[0.1em] text-[#655e57] dark:text-zinc-500">
                   Invite (they get an email when you approve)
                 </span>
                 <ul className="flex flex-wrap gap-1.5">
-                  {attendees.length === 0 && <li className="text-[12px] text-stone-500">No guests, just your calendar.</li>}
+                  {attendees.length === 0 && <li className="text-[13px] text-[#655e57]">No guests, just your calendar.</li>}
                   {attendees.map((g) => (
-                    <li key={g} className="inline-flex items-center gap-1 rounded-md bg-[#efe8d9] py-0.5 pl-2 pr-1 text-[11px] text-stone-700 dark:bg-zinc-800 dark:text-zinc-300">
+                    <li key={g} className="inline-flex items-center gap-1 rounded-md bg-[#efe8d9] py-0.5 pl-2 pr-1 text-[12px] text-stone-700 dark:bg-zinc-800 dark:text-zinc-300">
                       {g}
                       {open && (
                         <button
                           type="button"
                           aria-label={`Remove ${g}`}
                           onClick={() => setAttendees(attendees.filter((x) => x !== g))}
-                          className="grid size-4 place-items-center rounded hover:bg-[#e6dcc8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 dark:hover:bg-zinc-700"
+                          className="grid size-6 place-items-center rounded hover:bg-[#e6dcc8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 dark:hover:bg-zinc-700"
                         >
                           <X aria-hidden="true" className="size-3" />
                         </button>
@@ -145,13 +159,13 @@ export default function ApprovalCard({ a }: { a: Approval }) {
 
           {a.type === 'reply' &&
             (open ? (
-              <label className="mt-3 block space-y-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-500 dark:text-zinc-500">
+              <label className="mt-3 block space-y-1.5 font-mono text-[12px] font-medium uppercase tracking-[0.1em] text-[#655e57] dark:text-zinc-500">
                 Reply (edit before sending)
                 <textarea
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   rows={5}
-                  className={`${field} text-teal-900 normal-case tracking-normal dark:text-zinc-100`}
+                  className={`${field} text-teal-900 font-sans normal-case tracking-normal dark:text-zinc-100`}
                 />
               </label>
             ) : (
@@ -165,7 +179,7 @@ export default function ApprovalCard({ a }: { a: Approval }) {
           {open && (
             <div className="mt-4 space-y-3">
               {rejecting && (
-                <label className="block space-y-1.5 text-[12px] font-medium text-teal-900 dark:text-zinc-200">
+                <label className="block space-y-1.5 text-[13px] font-medium text-teal-900 dark:text-zinc-200">
                   Why? {a.type === 'reply' || a.type === 'meeting' ? '(the assistant will try again with your reason)' : '(optional)'}
                   <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} maxLength={500} className={field} autoFocus />
                 </label>
