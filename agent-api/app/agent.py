@@ -30,7 +30,11 @@ def _client() -> genai.Client:
     key = os.getenv("GEMINI_API_KEY")
     if not key:
         raise MissingKey("GEMINI_API_KEY is not set. Add it to agent-api/.env and restart the API.")
-    return genai.Client(api_key=key)
+    # A hung call would hold the inbox lock forever; transient 429/5xx errors are retried with backoff.
+    return genai.Client(api_key=key, http_options=types.HttpOptions(
+        timeout=int(os.getenv("GEMINI_TIMEOUT_MS", "60000")),
+        retry_options=types.HttpRetryOptions(attempts=3, http_status_codes=[408, 429, 500, 502, 503, 504]),
+    ))
 
 
 def _model() -> str:
@@ -82,9 +86,11 @@ def process_request(client: genai.Client, req: dict) -> None:
 
 
 def process_inbox() -> dict:
-    """Fetch new Gmail, then run the agent on every unprocessed request."""
+    """Fetch new Gmail, then run the agent on every unprocessed request. Returns {"busy": True} if a run is in progress."""
     client = _client()
-    with _inbox_lock:
+    if not _inbox_lock.acquire(blocking=False):  # never queue behind a running (or stuck) run
+        return {"busy": True}
+    try:
         fetched = google_api.fetch_new_mail()
         done, failed = [], []
         for req in store.list_requests():
@@ -98,6 +104,8 @@ def process_inbox() -> dict:
                 log("agent_error", requestId=req["id"], error=str(e)[:300])
                 failed.append({"id": req["id"], "error": str(e)[:300]})
         return {"fetched": fetched, "processed": done, "failed": failed}
+    finally:
+        _inbox_lock.release()
 
 
 def prepare_meeting(client: genai.Client, event: dict) -> dict:

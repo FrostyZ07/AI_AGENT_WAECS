@@ -6,7 +6,7 @@ from datetime import timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from app import google_api, main, prompt, store, tools
+from app import agent, google_api, main, prompt, store, tools
 
 KEY = "k" * 32
 SETTINGS = {
@@ -371,6 +371,26 @@ def test_good_settings_are_cleaned_and_saved(fake, client, monkeypatch):
     assert r.status_code == 200
     assert saved["sensitiveKeywords"] == ["a"] and saved["attendeeAllowDomains"] == ["corp.com"]
     assert saved["reminderMinutes"] == 15 and saved["escalationAlerts"] is True
+
+
+def test_gemini_client_has_timeout_and_retries(monkeypatch):
+    seen = {}
+    monkeypatch.setenv("GEMINI_API_KEY", "x")
+    monkeypatch.setattr(agent.genai, "Client", lambda **kw: seen.update(kw) or "client")
+    assert agent._client() == "client"
+    opts = seen["http_options"]
+    assert opts.timeout == 60000 and opts.retry_options.attempts == 3 and 429 in opts.retry_options.http_status_codes
+
+
+def test_inbox_run_does_not_queue_behind_a_running_one(fake, client, monkeypatch):
+    monkeypatch.setattr(agent, "_client", lambda: object())
+    assert agent._inbox_lock.acquire(blocking=False)
+    try:
+        assert agent.process_inbox() == {"busy": True}
+        r = client.post("/process-inbox")
+        assert r.status_code == 409 and "already running" in r.json()["detail"]
+    finally:
+        agent._inbox_lock.release()
 
 
 def test_html_only_mail_is_converted_to_text():

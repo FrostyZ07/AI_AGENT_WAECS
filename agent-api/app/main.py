@@ -181,7 +181,10 @@ def state():
 
 @api.post("/process-inbox")
 def process_inbox():
-    return _run(agent.process_inbox)
+    result = _run(agent.process_inbox)
+    if result.get("busy"):
+        raise HTTPException(409, "Inbox processing is already running. Try again in a minute.")
+    return result
 
 
 @api.post("/brief")
