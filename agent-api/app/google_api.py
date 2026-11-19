@@ -205,11 +205,27 @@ def _attachment_names(payload: dict, out: list[str] | None = None) -> list[str]:
     return out
 
 
+_AUTOMATED_SENDER = re.compile(r"^(?:no[-_.]?reply|do[-_.]?not[-_.]?reply|mailer[-_.]?daemon|notifications?|newsletters?)\b", re.I)
+
+
+def is_automated(payload: dict, sender: str) -> bool:
+    """Newsletters, mailing lists, auto-replies and no-reply senders: mail no person is waiting on an answer to."""
+    if _header(payload, "List-Unsubscribe") or _header(payload, "List-Id"):
+        return True
+    if _header(payload, "Precedence").strip().lower() in ("bulk", "list", "junk"):
+        return True
+    auto = _header(payload, "Auto-Submitted").strip().lower()
+    if auto and auto != "no":
+        return True
+    return bool(_AUTOMATED_SENDER.match(sender.split("@")[0]))
+
+
 def fetch_new_mail(max_results: int = 20) -> int:
     """Pull recent inbox mail into the requests table. Read-only: never modifies the mailbox. Returns count added."""
     gmail = _svc("gmail", "v1")
     me = principal_email().lower()
-    refs = gmail.users().messages().list(userId="me", q="in:inbox newer_than:2d -from:me", maxResults=max_results).execute()
+    q = "in:inbox newer_than:2d -from:me -category:promotions -category:social"
+    refs = gmail.users().messages().list(userId="me", q=q, maxResults=max_results).execute()
     added = 0
     for ref in refs.get("messages", []):
         if store.request_exists(ref["id"]):
@@ -229,7 +245,7 @@ def fetch_new_mail(max_results: int = 20) -> int:
         # Everyone on the thread: the only people the agent may invite or mention without the principal adding them.
         participants = sorted({a.lower() for _, a in getaddresses([_header(p, h) for h in ("From", "To", "Cc")]) if a})
         store.upsert_request(msg["id"], msg["threadId"], _header(p, "Message-ID"), sender, subject, body, received, kind,
-                             participants, attachments=_attachment_names(p))
+                             participants, attachments=_attachment_names(p), automated=is_automated(p, sender))
         added += 1
     if added:
         store.log("mail_fetched", count=added)

@@ -124,9 +124,15 @@ def process_inbox() -> dict:
         return {"busy": True}
     try:
         fetched = google_api.fetch_new_mail()
-        done, failed, review = [], [], []
+        done, failed, review, skipped = [], [], [], []
         for req in store.list_requests():
             if req["processed"]:
+                continue
+            # Newsletters and no-reply mail need no answer. An automated invoice or itinerary still goes through,
+            # so the payment/travel sign-off rule keeps applying.
+            if req.get("automated") and not classify_sensitive(req):
+                store.update_request(req["id"], processed=True, kind="bulk")
+                skipped.append(req["id"])
                 continue
             try:
                 unhandled = process_request(client, req)
@@ -146,7 +152,9 @@ def process_inbox() -> dict:
                         review.append(req["id"])
                 except Exception as e2:
                     log("review_flag_error", requestId=req["id"], error=str(e2)[:300])
-        return {"fetched": fetched, "processed": done, "failed": failed, "review": review}
+        if skipped:
+            log("mail_skipped", count=len(skipped))
+        return {"fetched": fetched, "processed": done, "failed": failed, "review": review, "skipped": skipped}
     finally:
         _inbox_lock.release()
 

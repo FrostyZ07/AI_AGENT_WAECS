@@ -492,6 +492,56 @@ def test_approving_a_review_item_sends_nothing(fake, client, monkeypatch):
     assert fake["sent"] == [] and fake["events"] == []
 
 
+# ---- automated mail ------------------------------------------------------------------
+
+
+def _headers(**h):
+    return {"headers": [{"name": k.replace("_", "-"), "value": v} for k, v in h.items()]}
+
+
+@pytest.mark.parametrize("payload,sender", [
+    (_headers(List_Unsubscribe="<mailto:u@x.com>"), "deals@shop.com"),
+    (_headers(List_Id="<team.lists.x.com>"), "someone@x.com"),
+    (_headers(Precedence="bulk"), "someone@x.com"),
+    (_headers(Auto_Submitted="auto-replied"), "someone@x.com"),
+    (_headers(), "noreply@bank.com"),
+    (_headers(), "no-reply@airline.com"),
+    (_headers(), "do_not_reply@x.com"),
+    (_headers(), "notifications@github.com"),
+    (_headers(), "MAILER-DAEMON@x.com"),
+])
+def test_automated_mail_is_detected(payload, sender):
+    assert google_api.is_automated(payload, sender)
+
+
+@pytest.mark.parametrize("payload,sender", [
+    (_headers(Auto_Submitted="no"), "ravi@client.com"),
+    (_headers(), "noreen@client.com"),  # a real name that starts like "no..."
+    (_headers(Precedence="normal"), "newsdesk.editor@paper.com"),
+])
+def test_personal_mail_is_not_treated_as_automated(payload, sender):
+    assert not google_api.is_automated(payload, sender)
+
+
+def test_automated_mail_is_skipped_without_calling_the_model(fake, monkeypatch):
+    fake["requests"]["n"] = {**req("n", "Weekly digest", "top stories"), "automated": True}
+    calls = []
+    monkeypatch.setattr(agent, "_client", lambda: NS(models=NS(generate_content=lambda **kw: calls.append(kw))))
+    out = agent.process_inbox()
+    assert out["skipped"] == ["n"] and calls == [] and fake["approvals"] == []
+    assert fake["requests"]["n"]["processed"] is True and fake["requests"]["n"]["kind"] == "bulk"
+
+
+@pytest.mark.parametrize("subject,body,expected", [
+    ("Your invoice INV-77", "amount due", "payment"),
+    ("Your e-ticket", "flight AI-101 itinerary", "travel"),
+])
+def test_automated_invoice_or_itinerary_is_still_escalated(fake, monkeypatch, subject, body, expected):
+    fake["requests"]["b"] = {**req("b", subject, body), "automated": True}
+    out = run_inbox(monkeypatch, gemini_reply())
+    assert out["skipped"] == [] and [a["type"] for a in fake["approvals"]] == [expected]
+
+
 # ---- leak guards ---------------------------------------------------------------------
 
 

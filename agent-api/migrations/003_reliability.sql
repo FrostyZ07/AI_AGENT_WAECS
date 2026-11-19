@@ -5,3 +5,6 @@ alter table requests add column if not exists attempts int not null default 0;
 
 -- Attachment file names: "INV-0042.pdf" under a bland subject must still be escalated as a payment.
 alter table requests add column if not exists attachments jsonb;
+
+-- Newsletter / mailing list / auto-reply / no-reply sender. Skipped (kind = 'bulk') unless the guardrail flags it.
+alter table requests add column if not exists automated boolean not null default false;

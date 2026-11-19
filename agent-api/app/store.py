@@ -51,7 +51,7 @@ _REQ_COLS = (
     'id, thread_id AS "threadId", message_id AS "messageId", from_addr AS "from", subject, body, '
     'to_char(received_at AT TIME ZONE %(tz)s, \'HH24:MI\') AS "receivedAt", '
     'to_char(received_at AT TIME ZONE %(tz)s, \'DD Mon\') AS "receivedOn", '
-    'kind, triage, processed, participants, reject_note AS "rejectNote", attachments'
+    'kind, triage, processed, participants, reject_note AS "rejectNote", attachments, automated'
 )
 
 
@@ -60,7 +60,8 @@ def _tz() -> str:
 
 
 def list_requests() -> list[dict]:
-    return _q(f"SELECT {_REQ_COLS} FROM requests ORDER BY received_at", {"tz": _tz()})
+    """Requests the agent and the UI work with. Skipped bulk mail stays stored (so it is not fetched again) but hidden."""
+    return _q(f"SELECT {_REQ_COLS} FROM requests WHERE kind <> 'bulk' ORDER BY received_at", {"tz": _tz()})
 
 
 def get_request(request_id: str) -> dict | None:
@@ -73,17 +74,17 @@ def request_exists(request_id: str) -> bool:
 
 def upsert_request(id: str, thread_id: str, message_id: str, from_addr: str, subject: str, body: str,
                    received_at, kind: str, participants: list[str] | None = None,
-                   attachments: list[str] | None = None) -> None:
+                   attachments: list[str] | None = None, automated: bool = False) -> None:
     _q(
         "INSERT INTO requests (id, thread_id, message_id, from_addr, subject, body, received_at, kind, participants, "
-        "attachments) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING",
+        "attachments, automated) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING",
         (id, thread_id, message_id, from_addr, subject, body, received_at, kind,
          json.dumps(participants) if participants is not None else None,
-         json.dumps(attachments or [])), write=True,
+         json.dumps(attachments or []), automated), write=True,
     )
 
 
-_REQ_FIELDS = {"triage", "processed", "reject_note"}
+_REQ_FIELDS = {"triage", "processed", "reject_note", "kind"}
 
 
 def update_request(request_id: str, **fields) -> None:
