@@ -41,4 +41,5 @@ This is Next.js 16 with breaking changes from older versions (see `AGENTS.md`). 
 - Meeting dates are `day` offsets from today plus `"HH:MM"` strings (rendered via `dayLabel`), so server and client render identically.
 - Screens: `/brief` (Generate brief), `/approvals` (Approve/Reject), `/calendar` (Process inbox + schedule), `/settings` (saved to the API; the prompt reads them). `/` redirects to `/brief`.
 - Guardrails are enforced in code in `agent-api/app/tools.py` and `agent.py`: no send/book/pay tool exists (real side effects - send reply, create event - happen only in `POST /approvals/{id}` after approval; payment/travel/sensitive only record sign-off, code never pays or books); `classify_sensitive` force-escalates payment/travel/sensitive mail before the model runs and again as a backstop after; `propose_meeting` re-checks clashes and working hours.
-- Approval `type` values `payment`, `travel`, `sensitive` are the spec's human-checkpoint cases, styled red.
+- Approval `type` values `payment`, `travel`, `sensitive` are the spec's human-checkpoint cases, styled red. `review` (also red) is mail the agent could not handle; approving it only acknowledges it.
+- Guardrail time checks use `tools.now()` (the tests pin it to a fixed Monday 08:00); don't call `datetime.now()` directly in guardrail code.
