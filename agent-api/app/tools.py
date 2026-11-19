@@ -43,8 +43,13 @@ def slot_start(day: date | int, hhmm: str) -> datetime:
 
 
 def _earliest() -> datetime:
-    """The first moment a meeting may start."""
-    return now()
+    """The first moment the agent may propose a meeting for: now plus the minimum-notice setting."""
+    return now() + timedelta(minutes=int(store.get_settings().get("minNoticeMinutes", 120)))
+
+
+def _is_working_day(day: int) -> bool:
+    days = store.get_settings().get("workingDays", [0, 1, 2, 3, 4])
+    return (today() + timedelta(days=day)).weekday() in days
 
 
 def _busy(day: int) -> list[tuple[int, int]]:
@@ -172,13 +177,15 @@ def get_calendar(from_day: int, to_day: int) -> dict:
 
 
 def find_free_slots(day: int, duration_min: int) -> dict:
-    """Find free start times on a day, inside working hours, that do not clash with any meeting or pending proposal
-    and are not in the past.
+    """Find free start times on a working day, inside working hours, that do not clash with any meeting or pending
+    proposal and give the principal enough notice.
 
     Args:
         day: Day offset (0 = today, 1 = tomorrow).
         duration_min: Meeting length in minutes.
     """
+    if not _is_working_day(day):
+        return {"day": day, "freeSlots": [], "note": "not a working day; try another day"}
     wh = store.get_settings()["workingHours"]
     start, end = _mins(wh["start"]), _mins(wh["end"])
     busy = _busy(day)
@@ -243,8 +250,12 @@ def propose_meeting(request_id: str, title: str, day: int, start: str, end: str,
         return {"error": "day must be today or later"}
     if day > MAX_DAYS_AHEAD:
         return {"error": f"day must be within {MAX_DAYS_AHEAD} days"}
-    if slot_start(day, start) < _earliest():
+    if not _is_working_day(day):
+        return {"error": "that is not a working day; call find_free_slots for another day"}
+    if slot_start(day, start) < now():
         return {"error": "that time has already passed; call find_free_slots"}
+    if slot_start(day, start) < _earliest():
+        return {"error": "too soon: the principal needs more notice; call find_free_slots"}
     bad = disallowed_attendees(attendees, req)
     if bad:
         return {"error": f"{', '.join(bad)} are not on the email thread; only invite people from the thread"}

@@ -174,6 +174,7 @@ def add_approval(type_: str, summary: str, request_id: str | None = None, draft:
 DEFAULT_SETTINGS = {
     "timezone": "Asia/Kolkata", "briefTime": "08:00", "pollMinutes": 10,
     "attendeeAllowDomains": [], "reminderMinutes": 15, "escalationAlerts": True,
+    "workingDays": [0, 1, 2, 3, 4], "minNoticeMinutes": 120,  # 0 = Monday
 }
 
 

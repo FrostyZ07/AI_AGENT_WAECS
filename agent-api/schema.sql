@@ -84,5 +84,7 @@ insert into settings (id, data) values (1, '{
   "pollMinutes": 10,
   "attendeeAllowDomains": [],
   "reminderMinutes": 15,
-  "escalationAlerts": true
+  "escalationAlerts": true,
+  "workingDays": [0, 1, 2, 3, 4],
+  "minNoticeMinutes": 120
 }') on conflict (id) do nothing;

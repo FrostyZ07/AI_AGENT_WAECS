@@ -119,6 +119,15 @@ class Settings(BaseModel):
     attendeeAllowDomains: list[str] = []
     reminderMinutes: int = Field(15, ge=0, le=1440)
     escalationAlerts: bool = True
+    workingDays: list[int] = [0, 1, 2, 3, 4]  # 0 = Monday ... 6 = Sunday
+    minNoticeMinutes: int = Field(120, ge=0, le=1440)
+
+    @field_validator("workingDays")
+    @classmethod
+    def _days(cls, v: list[int]) -> list[int]:
+        if not v or any(d < 0 or d > 6 for d in v):
+            raise ValueError("pick at least one working day (0 = Monday ... 6 = Sunday)")
+        return sorted(set(v))
 
     @field_validator("briefTime")
     @classmethod

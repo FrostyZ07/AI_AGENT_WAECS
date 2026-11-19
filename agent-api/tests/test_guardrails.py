@@ -16,6 +16,7 @@ SETTINGS = {
     "replyTemplates": [],
     "timezone": "Asia/Kolkata", "briefTime": "08:00", "pollMinutes": 10,
     "attendeeAllowDomains": [], "reminderMinutes": 15, "escalationAlerts": True,
+    "workingDays": [0, 1, 2, 3, 4], "minNoticeMinutes": 0,  # notice is tested on its own
 }
 OPEN = ("pending", "approving", "approved")
 NOW = datetime(2026, 11, 16, 8, 0, tzinfo=ZoneInfo("Asia/Kolkata"))  # a Monday, before working hours
@@ -31,7 +32,9 @@ def fake(monkeypatch):
     monkeypatch.setenv("AGENT_API_KEY", KEY)
     monkeypatch.setitem(SETTINGS, "attendeeAllowDomains", [])
     monkeypatch.setitem(SETTINGS, "escalationAlerts", True)
-    db = {"requests": {}, "approvals": [], "meetings": [], "sent": [], "events": [], "alerts": []}
+    monkeypatch.setitem(SETTINGS, "minNoticeMinutes", 0)
+    monkeypatch.setitem(SETTINGS, "workingDays", [0, 1, 2, 3, 4])
+    db ={"requests": {}, "approvals": [], "meetings": [], "sent": [], "events": [], "alerts": []}
 
     def get(aid):
         return next((a for a in db["approvals"] if a["id"] == aid), None)
@@ -332,6 +335,31 @@ def test_approving_a_meeting_whose_time_passed_is_refused(fake, client, monkeypa
     assert len(fake["events"]) == 1
 
 
+def test_minimum_notice_is_respected(fake, monkeypatch):
+    monkeypatch.setitem(SETTINGS, "minNoticeMinutes", 120)
+    _at(monkeypatch, 13, 10)
+    assert tools.find_free_slots(0, 30)["freeSlots"][0]["start"] == "15:30"
+    fake["requests"]["m"] = req("m", "Catch up", "today?")
+    assert "notice" in tools.propose_meeting("m", "Call", 0, "14:00", "14:30", [])["error"]
+    assert tools.propose_meeting("m", "Call", 0, "15:30", "16:00", [])["ok"]
+
+
+def test_no_meetings_on_non_working_days(fake, monkeypatch):
+    # NOW is Monday, so day 5 is Saturday and day 6 Sunday.
+    out = tools.find_free_slots(5, 30)
+    assert out["freeSlots"] == [] and "not a working day" in out["note"]
+    fake["requests"]["m"] = req("m", "Catch up", "weekend?")
+    assert "working day" in tools.propose_meeting("m", "Call", 6, "10:00", "10:30", [])["error"]
+    monkeypatch.setitem(SETTINGS, "workingDays", [0, 1, 2, 3, 4, 5])  # a six-day week
+    assert tools.find_free_slots(5, 30)["freeSlots"]
+    assert tools.propose_meeting("m", "Call", 5, "10:00", "10:30", [])["ok"]
+
+
+def test_prompt_names_working_days_and_notice():
+    p = prompt.build_system_prompt({**SETTINGS, "workingDays": [0, 5], "minNoticeMinutes": 90})
+    assert "Monday, Saturday" in p and "90 minutes" in p
+
+
 # ---- leak guards ---------------------------------------------------------------------
 
 
@@ -393,7 +421,8 @@ GOOD = {"workingHours": {"start": "09:00", "end": "18:00"}, "sensitiveKeywords":
 @pytest.mark.parametrize("change", [
     {"briefTime": "25:00"}, {"briefTime": "8am"}, {"timezone": "Mars/Base"}, {"pollMinutes": 1}, {"pollMinutes": 0},
     {"workingHours": {"start": "18:00", "end": "09:00"}}, {"workingHours": {"start": "9", "end": "18:00"}},
-    {"reminderMinutes": -1},
+    {"reminderMinutes": -1}, {"workingDays": []}, {"workingDays": [7]}, {"workingDays": [-1]},
+    {"minNoticeMinutes": -5}, {"minNoticeMinutes": 2000},
 ])
 def test_bad_settings_are_rejected(fake, client, change):
     assert client.put("/settings", json={**GOOD, **change}).status_code == 422
@@ -402,10 +431,11 @@ def test_bad_settings_are_rejected(fake, client, change):
 def test_good_settings_are_cleaned_and_saved(fake, client, monkeypatch):
     saved = {}
     monkeypatch.setattr(store, "save_settings", lambda d: saved.update(d) or d)
-    r = client.put("/settings", json={**GOOD, "attendeeAllowDomains": ["@Corp.com"]})
+    r = client.put("/settings", json={**GOOD, "attendeeAllowDomains": ["@Corp.com"], "workingDays": [4, 0, 0, 5]})
     assert r.status_code == 200
     assert saved["sensitiveKeywords"] == ["a"] and saved["attendeeAllowDomains"] == ["corp.com"]
     assert saved["reminderMinutes"] == 15 and saved["escalationAlerts"] is True
+    assert saved["workingDays"] == [0, 4, 5] and saved["minNoticeMinutes"] == 120
 
 
 def test_gemini_client_has_timeout_and_retries(monkeypatch):
