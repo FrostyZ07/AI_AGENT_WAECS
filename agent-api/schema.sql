@@ -10,7 +10,9 @@ create table if not exists requests (
   received_at timestamptz not null default now(),
   kind text not null default 'mail',   -- 'mail' | 'meeting'
   triage text not null default 'routine',
-  processed boolean not null default false
+  processed boolean not null default false,
+  participants jsonb,                  -- From/To/Cc addresses
+  reject_note text                     -- principal's reason when a proposal was rejected
 );
 
 create table if not exists approvals (
@@ -18,14 +20,32 @@ create table if not exists approvals (
   type text not null,                  -- reply | meeting | payment | travel | sensitive
   summary text not null,
   draft text,
-  status text not null default 'pending',
+  status text not null default 'pending',   -- pending | approving | approved | rejected
   request_id text,
   title text,
   day int,
   start text,
   "end" text,
   attendees jsonb,
-  google_ref text                      -- created event id or sent message id
+  google_ref text,                     -- created event id or sent message id
+  meeting_date date,                   -- absolute date of a proposed meeting
+  created_at timestamptz not null default now(),
+  decided_at timestamptz,
+  decision_note text,
+  edited boolean not null default false
+);
+
+-- One open proposal per request and type: re-running the agent can't create duplicates.
+create unique index if not exists approvals_one_open_per_request
+  on approvals (request_id, type)
+  where request_id is not null and status in ('pending', 'approving', 'approved');
+
+create table if not exists meeting_prep (
+  event_id text primary key,           -- Google Calendar event id
+  meeting_date date,
+  note text not null default '',
+  docs jsonb not null default '[]',    -- [{id, name, url, modified}]
+  generated_at timestamptz not null default now()
 );
 
 create table if not exists settings (
@@ -61,5 +81,8 @@ insert into settings (id, data) values (1, '{
   ],
   "timezone": "Asia/Kolkata",
   "briefTime": "08:00",
-  "pollMinutes": 10
+  "pollMinutes": 10,
+  "attendeeAllowDomains": [],
+  "reminderMinutes": 15,
+  "escalationAlerts": true
 }') on conflict (id) do nothing;

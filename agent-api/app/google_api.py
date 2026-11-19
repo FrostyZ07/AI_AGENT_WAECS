@@ -10,7 +10,8 @@ import os
 import re
 from datetime import date, datetime, timedelta, timezone
 from email.message import EmailMessage
-from email.utils import parseaddr, parsedate_to_datetime
+from email.utils import getaddresses, parseaddr, parsedate_to_datetime
+from html.parser import HTMLParser
 from zoneinfo import ZoneInfo
 
 from google.auth.transport.requests import Request as GRequest
@@ -25,6 +26,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/calendar.events",
     "https://www.googleapis.com/auth/tasks",
+    "https://www.googleapis.com/auth/drive.readonly",  # meeting prep: find and read docs. Needs a one-time reconnect.
 ]
 TASKLIST_TITLE = "EA Follow-ups"
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -120,15 +122,50 @@ def _header(payload: dict, name: str) -> str:
     return next((h["value"] for h in payload.get("headers", []) if h["name"].lower() == name.lower()), "")
 
 
-def _text_body(payload: dict) -> str:
-    """Best-effort text/plain extraction from a Gmail message payload."""
-    if payload.get("mimeType") == "text/plain" and payload.get("body", {}).get("data"):
+class _HtmlText(HTMLParser):
+    """Tiny HTML -> text converter for HTML-only mail (stdlib, no extra dependency)."""
+
+    def __init__(self):
+        super().__init__()
+        self.out: list[str] = []
+        self._skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style"):
+            self._skip += 1
+        elif tag in ("br", "p", "div", "tr", "li"):
+            self.out.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style") and self._skip:
+            self._skip -= 1
+
+    def handle_data(self, data):
+        if not self._skip:
+            self.out.append(data)
+
+
+def _find_part(payload: dict, mime: str) -> str:
+    if payload.get("mimeType") == mime and payload.get("body", {}).get("data"):
         return base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8", "replace")
     for part in payload.get("parts", []) or []:
-        text = _text_body(part)
+        text = _find_part(part, mime)
         if text:
             return text
     return ""
+
+
+def _text_body(payload: dict) -> str:
+    """Best-effort text extraction from a Gmail message payload: text/plain, else the HTML part with tags stripped."""
+    text = _find_part(payload, "text/plain")
+    if text:
+        return text
+    html = _find_part(payload, "text/html")
+    if not html:
+        return ""
+    parser = _HtmlText()
+    parser.feed(html)
+    return re.sub(r"\n\s*\n+", "\n\n", "".join(parser.out))
 
 
 def fetch_new_mail(max_results: int = 20) -> int:
@@ -152,7 +189,10 @@ def fetch_new_mail(max_results: int = 20) -> int:
         except (TypeError, ValueError):
             received = datetime.fromtimestamp(int(msg["internalDate"]) / 1000, timezone.utc)
         kind = "meeting" if _MEETING_WORDS.search(f"{subject} {body}") else "mail"
-        store.upsert_request(msg["id"], msg["threadId"], _header(p, "Message-ID"), sender, subject, body, received, kind)
+        # Everyone on the thread: the only people the agent may invite or mention without the principal adding them.
+        participants = sorted({a.lower() for _, a in getaddresses([_header(p, h) for h in ("From", "To", "Cc")]) if a})
+        store.upsert_request(msg["id"], msg["threadId"], _header(p, "Message-ID"), sender, subject, body, received, kind,
+                             participants)
         added += 1
     if added:
         store.log("mail_fetched", count=added)
@@ -222,6 +262,8 @@ def list_meetings(from_day: int, to_day: int) -> list[dict]:
             "id": e["id"], "title": e.get("summary", "(no title)"), "day": (start_d - today).days,
             "start": start_t, "end": end_t,
             "attendees": [a.get("displayName") or a["email"] for a in e.get("attendees", [])] or ["Just you"],
+            "attendeeEmails": [a["email"] for a in e.get("attendees", []) if a.get("email")],
+            "description": (e.get("description") or "").strip()[:1500],
             "allDay": all_day,
         }
         if e.get("description"):
@@ -247,6 +289,8 @@ def create_event(title: str, day: int, start: str, end: str, attendees: list[str
         "end": {"dateTime": at(end), "timeZone": tz.key},
         "attendees": [{"email": a} for a in emails],
     }
+    mins = int(store.get_settings().get("reminderMinutes", 15))
+    event["reminders"] = {"useDefault": False, "overrides": [{"method": "popup", "minutes": mins}, {"method": "email", "minutes": mins}]}
     if others:
         event["description"] = "With: " + ", ".join(others)
     created = _svc("calendar", "v3").events().insert(calendarId="primary", body=event, sendUpdates="all").execute()
@@ -291,14 +335,64 @@ def add_task(task: str, owner: str, due: str) -> str:
 
 def list_follow_ups() -> list[dict]:
     items = _svc("tasks", "v1").tasks().list(tasklist=_tasklist_id(), showCompleted=True, showHidden=True, maxResults=100).execute().get("items", [])
+    today = datetime.now(_tz()).date().isoformat()
     out = []
     for t in items:
         notes = t.get("notes", "")
         owner = re.search(r"Owner: (.+)", notes)
         due = re.search(r"Due: (.+)", notes)
+        done = t.get("status") == "completed"
+        due_date = t["due"][:10] if t.get("due") else None
         out.append({
             "id": t["id"], "task": t.get("title", ""), "owner": owner.group(1) if owner else "Assistant",
-            "due": due.group(1) if due else (t["due"][:10] if t.get("due") else "No date"),
-            "done": t.get("status") == "completed",
+            "due": due.group(1) if due else (due_date or "No date"),
+            "done": done, "dueDate": due_date, "overdue": bool(not done and due_date and due_date < today),
         })
     return out
+
+
+def complete_task(task_id: str) -> None:
+    """Mark a follow-up done. It is the principal's own task list, so this needs no approval."""
+    _svc("tasks", "v1").tasks().patch(tasklist=_tasklist_id(), task=task_id, body={"status": "completed"}).execute()
+
+
+# ---- Drive (read-only, for meeting prep) -------------------------------------
+
+_STOP_WORDS = {"meeting", "call", "sync", "catch", "with", "discussion", "review", "update", "weekly", "intro",
+               "chat", "quick", "about", "from", "this", "that", "next"}
+_GDOC = "application/vnd.google-apps.document"
+
+
+def _esc(s: str) -> str:
+    return s.replace("\\", "\\\\").replace("'", "\\'")
+
+
+def search_docs(title: str, attendee_emails: list[str], limit: int = 5) -> list[dict]:
+    """Recent Drive files whose name/text matches the meeting title, or that an attendee owns. Read-only."""
+    try:
+        me = principal_email().lower()
+    except NotConnected:
+        me = ""
+    words = [w for w in re.findall(r"[A-Za-z0-9]{4,}", title) if w.lower() not in _STOP_WORDS][:4]
+    emails = [e for e in attendee_emails if e.lower() != me][:4]
+    clauses = ([f"name contains '{_esc(w)}'" for w in words] + [f"fullText contains '{_esc(w)}'" for w in words]
+               + [f"'{_esc(e)}' in owners" for e in emails])
+    if not clauses:
+        return []
+    since = (datetime.now(timezone.utc) - timedelta(days=90)).strftime("%Y-%m-%dT%H:%M:%S")
+    q = (f"trashed = false and modifiedTime > '{since}' and mimeType != 'application/vnd.google-apps.folder' "
+         f"and ({' or '.join(clauses)})")
+    res = _svc("drive", "v3").files().list(
+        q=q, orderBy="modifiedTime desc", pageSize=limit, fields="files(id,name,mimeType,webViewLink,modifiedTime)",
+    ).execute()
+    return [{"id": f["id"], "name": f["name"], "url": f.get("webViewLink"), "modified": f["modifiedTime"][:10],
+             "mimeType": f["mimeType"]} for f in res.get("files", [])]
+
+
+def doc_text(file: dict, limit: int = 3000) -> str:
+    """Plain text of a Google Doc (other file types are linked only). Never leaves the server except to the principal."""
+    if file.get("mimeType") != _GDOC:
+        return ""
+    data = _svc("drive", "v3").files().export(fileId=file["id"], mimeType="text/plain").execute()
+    text = data.decode("utf-8", "replace") if isinstance(data, bytes) else str(data)
+    return text.strip()[:limit]

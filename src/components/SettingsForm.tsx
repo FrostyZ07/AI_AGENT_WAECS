@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { saveSettingsAction } from "@/app/actions";
+import { Badge, Card, btnPrimary, btnSecondary, input } from "@/components/ui";
 import type { Settings, State } from "@/lib/api";
 
 export default function SettingsForm({
@@ -22,15 +23,14 @@ export default function SettingsForm({
   const [timezone, setTimezone] = useState(initial.timezone);
   const [briefTime, setBriefTime] = useState(initial.briefTime);
   const [pollMinutes, setPollMinutes] = useState(initial.pollMinutes);
-  const [status, setStatus] = useState<string | null>(null);
+  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const field = "w-full rounded border bg-transparent p-2 text-sm";
   const lines = (s: string, sep: RegExp) => s.split(sep).map((x) => x.trim()).filter(Boolean);
 
   return (
     <form
-      className="max-w-xl space-y-4"
+      className="max-w-2xl space-y-6"
       onSubmit={async (e) => {
         e.preventDefault();
         setSaving(true);
@@ -43,76 +43,87 @@ export default function SettingsForm({
           pollMinutes: Math.max(1, Number(pollMinutes) || 10),
         });
         setSaving(false);
-        setStatus(err ?? "Saved. The agent uses these rules on its next run.");
+        setStatus(err ? { ok: false, text: err } : { ok: true, text: "Saved. The agent uses these rules on its next run." });
       }}
       onChange={() => setStatus(null)}
     >
-      <h2 className="text-xl font-semibold">Rules &amp; Settings</h2>
-
-      <div className="rounded border p-3 text-sm">
-        {google.connected ? (
-          <>
-            Google: connected as <b>{google.email}</b> (
-            <a className="underline" href={connectUrl}>
-              reconnect
-            </a>
-            )
-          </>
-        ) : (
-          <>
-            Google is not connected.{" "}
-            <a className="underline" href={connectUrl}>
-              Connect Google
-            </a>
-          </>
-        )}
-        {notice && <div className="mt-1">{notice}</div>}
-      </div>
-
-      <label className="block text-sm font-medium">
-        Working hours
-        <div className="mt-1 flex gap-2">
-          <input type="time" value={start} onChange={(e) => setStart(e.target.value)} className={field} />
-          <input type="time" value={end} onChange={(e) => setEnd(e.target.value)} className={field} />
+      <Card
+        title="Google account"
+        aside={google.connected ? <Badge tone="success">Connected</Badge> : <Badge tone="warning">Not connected</Badge>}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted">
+            {google.connected ? (
+              <>
+                Signed in as <span className="font-medium text-foreground">{google.email}</span>
+              </>
+            ) : (
+              "Connect Google to read mail and manage your calendar."
+            )}
+          </p>
+          <a href={connectUrl} className={google.connected ? btnSecondary : btnPrimary}>
+            {google.connected ? "Reconnect" : "Connect Google"}
+          </a>
         </div>
-      </label>
+        {notice && <p className="mt-3 text-sm">{notice}</p>}
+      </Card>
 
-      <label className="block text-sm font-medium">
-        Time zone (IANA name)
-        <input value={timezone} onChange={(e) => setTimezone(e.target.value)} className={`mt-1 ${field}`} />
-      </label>
+      <Card title="Working time">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block space-y-1.5 text-sm font-medium">
+            Working hours start
+            <input type="time" value={start} onChange={(e) => setStart(e.target.value)} className={input} />
+          </label>
+          <label className="block space-y-1.5 text-sm font-medium">
+            Working hours end
+            <input type="time" value={end} onChange={(e) => setEnd(e.target.value)} className={input} />
+          </label>
+          <label className="block space-y-1.5 text-sm font-medium sm:col-span-2">
+            Time zone (IANA name)
+            <input value={timezone} onChange={(e) => setTimezone(e.target.value)} className={input} />
+          </label>
+          <label className="block space-y-1.5 text-sm font-medium">
+            Daily brief email at
+            <input type="time" value={briefTime} onChange={(e) => setBriefTime(e.target.value)} className={input} />
+          </label>
+          <label className="block space-y-1.5 text-sm font-medium">
+            Check inbox every (minutes)
+            <input
+              type="number"
+              min={1}
+              value={pollMinutes}
+              onChange={(e) => setPollMinutes(Number(e.target.value))}
+              className={input}
+            />
+          </label>
+        </div>
+      </Card>
 
-      <div className="flex gap-2">
-        <label className="block flex-1 text-sm font-medium">
-          Daily brief email at
-          <input type="time" value={briefTime} onChange={(e) => setBriefTime(e.target.value)} className={`mt-1 ${field}`} />
-        </label>
-        <label className="block flex-1 text-sm font-medium">
-          Check inbox every (minutes)
-          <input
-            type="number"
-            min={1}
-            value={pollMinutes}
-            onChange={(e) => setPollMinutes(Number(e.target.value))}
-            className={`mt-1 ${field}`}
-          />
-        </label>
+      <Card title="Mail rules">
+        <div className="space-y-5">
+          <label className="block space-y-1.5 text-sm font-medium">
+            Sensitive keywords
+            <span className="block text-xs font-normal text-muted">Comma separated. Mail containing these is escalated to you.</span>
+            <input value={keywords} onChange={(e) => setKeywords(e.target.value)} className={input} />
+          </label>
+          <label className="block space-y-1.5 text-sm font-medium">
+            Reply templates
+            <span className="block text-xs font-normal text-muted">One per line.</span>
+            <textarea rows={5} value={templates} onChange={(e) => setTemplates(e.target.value)} className={input} />
+          </label>
+        </div>
+      </Card>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="submit" disabled={saving} className={btnPrimary}>
+          {saving ? "Saving..." : "Save changes"}
+        </button>
+        {status && (
+          <span role="status" className={`text-sm ${status.ok ? "text-green-700 dark:text-green-400" : "text-danger"}`}>
+            {status.text}
+          </span>
+        )}
       </div>
-
-      <label className="block text-sm font-medium">
-        Sensitive keywords (comma separated)
-        <input value={keywords} onChange={(e) => setKeywords(e.target.value)} className={`mt-1 ${field}`} />
-      </label>
-
-      <label className="block text-sm font-medium">
-        Reply templates (one per line)
-        <textarea rows={5} value={templates} onChange={(e) => setTemplates(e.target.value)} className={`mt-1 ${field}`} />
-      </label>
-
-      <button type="submit" disabled={saving} className="rounded bg-foreground px-4 py-2 text-sm text-background disabled:opacity-50">
-        {saving ? "Saving..." : "Save"}
-      </button>
-      {status && <span className="ml-3 text-sm">{status}</span>}
     </form>
   );
 }

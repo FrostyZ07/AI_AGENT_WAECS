@@ -13,18 +13,22 @@ const links = [
 export default function Nav() {
   const pathname = usePathname();
   return (
-    <nav className="flex gap-1 md:flex-col">
-      {links.map((l) => (
-        <Link
-          key={l.href}
-          href={l.href}
-          className={`rounded px-3 py-2 text-sm ${
-            pathname === l.href ? "bg-foreground text-background" : "hover:bg-black/5 dark:hover:bg-white/10"
-          }`}
-        >
-          {l.label}
-        </Link>
-      ))}
+    <nav className="flex gap-1 overflow-x-auto md:flex-col md:overflow-visible">
+      {links.map((l) => {
+        const active = pathname === l.href;
+        return (
+          <Link
+            key={l.href}
+            href={l.href}
+            aria-current={active ? "page" : undefined}
+            className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition ${
+              active ? "bg-accent/10 text-accent" : "text-muted hover:bg-background hover:text-foreground"
+            }`}
+          >
+            {l.label}
+          </Link>
+        );
+      })}
     </nav>
   );
 }

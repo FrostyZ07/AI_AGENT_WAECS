@@ -3,15 +3,16 @@
 import json
 import os
 import threading
+from datetime import timedelta
 
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
 from app import google_api, store
-from app.prompt import BRIEF_PROMPT, build_system_prompt
+from app.prompt import BRIEF_PROMPT, PREP_PROMPT, build_system_prompt, fence
 from app.store import log
-from app.tools import TOOL_MAP, TOOLS, classify_sensitive, escalate
+from app.tools import TOOL_MAP, TOOLS, classify_sensitive, escalate, today
 
 load_dotenv()
 
@@ -38,7 +39,11 @@ def _model() -> str:
 
 def process_request(client: genai.Client, req: dict) -> None:
     forced = classify_sensitive(req)  # guardrail runs in code, before the model
-    prompt = f"From: {req['from']}\nSubject: {req['subject']}\nType: {req['kind']}\n\n{req['body']}\n\nRequest id: {req['id']}"
+    # Everything the sender controls (From, Subject, body) goes inside the fence: it is data, never instructions.
+    email = fence("EMAIL", f"From: {req['from']}\nSubject: {req['subject']}\n\n{req['body']}")
+    prompt = f"{email}\n\nType: {req['kind']}\nRequest id: {req['id']}"
+    if req.get("rejectNote"):  # written by the principal, so it sits outside the fence
+        prompt += f"\n\nThe principal REJECTED your earlier proposal for this request. Reason: {req['rejectNote']}\nMake a new proposal that follows this reason."
     if forced:
         prompt += f"\n\nGUARDRAIL: this is flagged '{forced}'. Triage it sensitive and call escalate with category '{forced}'. Do not draft or schedule."
 
@@ -87,7 +92,7 @@ def process_inbox() -> dict:
                 continue
             try:
                 process_request(client, req)
-                store.update_request(req["id"], processed=True)
+                store.update_request(req["id"], processed=True, reject_note=None)
                 done.append(req["id"])
             except Exception as e:  # keep going; one bad request must not block the rest
                 log("agent_error", requestId=req["id"], error=str(e)[:300])
@@ -95,14 +100,71 @@ def process_inbox() -> dict:
         return {"fetched": fetched, "processed": done, "failed": failed}
 
 
+def prepare_meeting(client: genai.Client, event: dict) -> dict:
+    """Find related Drive docs for a meeting and write a short prep note. Both go only to the principal (UI + brief)."""
+    try:
+        docs = google_api.search_docs(event["title"], event.get("attendeeEmails", []))
+    except Exception as e:  # e.g. Drive scope not granted yet: still write a note from the event itself
+        log("prep_docs_unavailable", eventId=event["id"], error=str(e)[:200])
+        docs = []
+    excerpts = []
+    for d in docs[:3]:
+        try:
+            text = google_api.doc_text(d)
+        except Exception:
+            text = ""
+        if text:
+            excerpts.append(fence(f"DOC {d['name']}", text))
+    day = today() + timedelta(days=event["day"])
+    prompt = PREP_PROMPT.format(
+        title=" ".join(event["title"].split())[:120], when=f"{day.isoformat()} {event['start']}-{event['end']}",
+        attendees=", ".join(event["attendees"]),
+        description=fence("EVENT DESCRIPTION", event.get("description") or "(none)"),
+        docs="\n\n".join(excerpts) or "No linked documents found.",
+    )
+    resp = client.models.generate_content(model=_model(), contents=prompt)
+    note = (resp.text or "").strip()
+    links = [{k: d[k] for k in ("id", "name", "url", "modified")} for d in docs]
+    store.save_prep(event["id"], day.isoformat(), note, links)
+    log("meeting_prepared", eventId=event["id"], docs=len(links))
+    return {"note": note, "docs": links}
+
+
+def prepare_upcoming(force: bool = False) -> dict:
+    """Prep today's and tomorrow's meetings that have guests. Skips ones prepared in the last 12 hours."""
+    client = _client()
+    done = skipped = failed = 0
+    for event in google_api.list_meetings(0, 1):
+        if event["allDay"] or not event.get("attendeeEmails"):
+            continue
+        if not force and store.prep_is_fresh(event["id"]):
+            skipped += 1
+            continue
+        try:
+            prepare_meeting(client, event)
+            done += 1
+        except Exception as e:  # one bad meeting must not stop the rest
+            log("prep_error", eventId=event["id"], error=str(e)[:300])
+            failed += 1
+    return {"prepared": done, "skipped": skipped, "failed": failed}
+
+
 def generate_brief(email: bool = False) -> dict:
     client = _client()
+    meetings = store.attach_prep(google_api.list_meetings(0, 0))
+    open_items = [f for f in google_api.list_follow_ups() if not f["done"]]
     data = {
-        "todayMeetings": google_api.list_meetings(0, 0),
-        "openFollowUps": [f for f in google_api.list_follow_ups() if not f["done"]],
+        "todayMeetings": [
+            {"title": m["title"], "start": m["start"], "end": m["end"], "attendees": m["attendees"],
+             "prepNote": m.get("prepNote"), "linkedDocs": [d["name"] for d in m.get("docs", [])]}
+            for m in meetings
+        ],
+        "overdueFollowUps": [{"task": f["task"], "owner": f["owner"], "due": f["due"]} for f in open_items if f["overdue"]],
+        "openFollowUps": [{"task": f["task"], "owner": f["owner"], "due": f["due"]} for f in open_items if not f["overdue"]],
         "pendingApprovals": [{"type": a["type"], "summary": a["summary"]} for a in store.list_approvals() if a["status"] == "pending"],
     }
-    resp = client.models.generate_content(model=_model(), contents=BRIEF_PROMPT.format(data=json.dumps(data, indent=1)))
+    resp = client.models.generate_content(
+        model=_model(), contents=BRIEF_PROMPT.format(data=fence("DATA", json.dumps(data, indent=1))))
     brief = store.save_brief(resp.text or "")
     log("brief_generated", emailed=email)
     if email:

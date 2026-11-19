@@ -1,13 +1,17 @@
+import hmac
 import os
+import re
 from contextlib import asynccontextmanager
+from datetime import date
+from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app import agent, google_api, store
+from app import agent, google_api, store, tools
 from app.store import log
 
 load_dotenv()
@@ -20,6 +24,10 @@ def _poll_inbox() -> None:
 
 
 def _daily_brief() -> None:
+    try:
+        agent.prepare_upcoming()  # meeting prep notes first, so the brief can include them
+    except Exception as e:
+        log("prep_error", error=str(e)[:300])
     agent.generate_brief(email=True)
 
 
@@ -43,6 +51,9 @@ def reschedule() -> None:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    key = os.getenv("AGENT_API_KEY", "")
+    if len(key) < 16:  # nothing here is safe to expose without it: refuse to start
+        raise RuntimeError("AGENT_API_KEY is not set (or shorter than 16 characters). Add a long random value to agent-api/.env.")
     if os.getenv("SCHEDULER_ENABLED") == "1":
         reschedule()
         scheduler.start()
@@ -51,16 +62,49 @@ async def lifespan(_: FastAPI):
         scheduler.shutdown(wait=False)
 
 
+def require_key(x_api_key: str | None = Header(default=None)) -> None:
+    """Every route except /health and the OAuth callback needs the shared secret the Next server sends."""
+    expected = os.getenv("AGENT_API_KEY", "")
+    if not expected:
+        raise HTTPException(503, "AGENT_API_KEY is not set on the server")
+    if not x_api_key or not hmac.compare_digest(x_api_key.encode(), expected.encode()):
+        raise HTTPException(401, "Invalid or missing API key")
+
+
 app = FastAPI(title="Executive Assistant Agent API", lifespan=lifespan)
+api = APIRouter(dependencies=[Depends(require_key)])
 
 
 class Decision(BaseModel):
     status: str  # "approved" | "rejected"
+    draft: str | None = None            # edited reply text (approve only)
+    attendees: list[str] | None = None  # edited invite list (approve only)
+    note: str | None = None             # reason, when rejecting: the agent re-drafts with it
+
+
+_HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def _hhmm(v: str) -> str:
+    if not _HHMM.match(v):
+        raise ValueError("must be a 24h time like 09:30")
+    return v
 
 
 class WorkingHours(BaseModel):
     start: str
     end: str
+
+    @field_validator("start", "end")
+    @classmethod
+    def _check(cls, v: str) -> str:
+        return _hhmm(v)
+
+    @model_validator(mode="after")
+    def _ordered(self):
+        if self.start >= self.end:
+            raise ValueError("working hours must start before they end")
+        return self
 
 
 class Settings(BaseModel):
@@ -69,7 +113,34 @@ class Settings(BaseModel):
     replyTemplates: list[str]
     timezone: str = "Asia/Kolkata"
     briefTime: str = "08:00"
-    pollMinutes: int = 10
+    pollMinutes: int = Field(10, ge=5, le=240)
+    attendeeAllowDomains: list[str] = []
+    reminderMinutes: int = Field(15, ge=0, le=1440)
+    escalationAlerts: bool = True
+
+    @field_validator("briefTime")
+    @classmethod
+    def _brief(cls, v: str) -> str:
+        return _hhmm(v)
+
+    @field_validator("timezone")
+    @classmethod
+    def _tz(cls, v: str) -> str:
+        try:
+            ZoneInfo(v)
+        except Exception:
+            raise ValueError("unknown timezone, use a name like Asia/Kolkata")
+        return v
+
+    @field_validator("sensitiveKeywords", "replyTemplates", "attendeeAllowDomains")
+    @classmethod
+    def _clean(cls, v: list[str]) -> list[str]:
+        return [x.strip() for x in v if x.strip()]
+
+    @field_validator("attendeeAllowDomains")
+    @classmethod
+    def _domains(cls, v: list[str]) -> list[str]:
+        return [d.lower().lstrip("@") for d in v]
 
 
 def _run(fn):
@@ -85,13 +156,18 @@ def _run(fn):
         raise HTTPException(502, f"Call failed: {str(e)[:300]}")
 
 
-@app.get("/state")
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+
+@api.get("/state")
 def state():
     g = google_api.status()
     meetings, follow_ups = [], []
     if g["connected"]:
         try:
-            meetings = google_api.list_meetings(0, 7)
+            meetings = store.attach_prep(google_api.list_meetings(0, 7))
             follow_ups = google_api.list_follow_ups()
         except Exception as e:  # show the app with an empty calendar rather than a blank error page
             log("state_google_error", error=str(e)[:300])
@@ -101,55 +177,141 @@ def state():
     }
 
 
-@app.post("/process-inbox")
+@api.post("/process-inbox")
 def process_inbox():
     return _run(agent.process_inbox)
 
 
-@app.post("/brief")
+@api.post("/brief")
 def brief():
     return _run(agent.generate_brief)
 
 
-def _apply_approved(a: dict) -> str | None:
+@api.post("/meetings/{event_id}/prep")
+def prep_meeting(event_id: str):
+    def go():
+        client = agent._client()
+        event = next((m for m in google_api.list_meetings(0, 14) if m["id"] == event_id), None)
+        if not event:
+            raise HTTPException(404, "Meeting not found in the next 14 days")
+        return agent.prepare_meeting(client, event)
+    return _run(go)
+
+
+@api.post("/follow-ups/{task_id}/done")
+def follow_up_done(task_id: str):
+    _run(lambda: google_api.complete_task(task_id))  # the principal's own task list: no approval needed
+    log("follow_up_done", followUpId=task_id)
+    return {"ok": True}
+
+
+@api.get("/kpis")
+def kpis(days: int = 30):
+    k = store.kpis(days)
+    try:
+        items = google_api.list_follow_ups()
+        k["followUps"] = {"closed": sum(1 for f in items if f["done"]), "total": len(items)}
+    except Exception:  # Google not connected or unreachable: the other KPIs still show
+        k["followUps"] = None
+    return k
+
+
+@api.get("/audit")
+def audit(limit: int = 100, event: str | None = None):
+    return {"entries": store.list_audit(limit, event), "events": store.audit_events()}
+
+
+def _apply_approved(a: dict, draft: str | None, attendees: list[str]) -> str | None:
     """Perform the real side effect for an approved item. Returns a Google ref, or None. Raises on failure."""
     if a["type"] == "meeting":
+        # The proposal pins an absolute date; day offsets go stale if approval happens on a later day.
+        day = (date.fromisoformat(a["meetingDate"]) - tools.today()).days if a.get("meetingDate") else a["day"]
+        if day < 0:
+            raise HTTPException(409, "This meeting's date has passed. Reject it and re-run the inbox.")
         # Re-check against the live calendar: it may have changed since the proposal was made.
-        for m in google_api.list_meetings(a["day"], a["day"]):
+        for m in google_api.list_meetings(day, day):
             if not m["allDay"] and a["start"] < m["end"] and a["end"] > m["start"]:
-                raise HTTPException(409, f"Clashes with '{m['title']}' ({m['start']}-{m['end']}). Reject this and re-run the inbox.")
-        return google_api.create_event(a["title"], a["day"], a["start"], a["end"], a["attendees"] or [])
+                log("approval_clash", approvalId=a["id"], clashesWith=m.get("title"))
+                raise HTTPException(409, f"Clashes with '{m.get('title')}' ({m['start']}-{m['end']}). Reject this and re-run the inbox.")
+        return google_api.create_event(a["title"], day, a["start"], a["end"], attendees)
     if a["type"] == "reply":
         req = store.get_request(a["requestId"])
         if not req:
             raise HTTPException(404, "original request not found")
-        return google_api.send_reply(req, a["draft"] or "")
+        return google_api.send_reply(req, draft or "")
     return None  # payment / travel / sensitive: sign-off is recorded only. Code never pays or books.
 
 
-@app.post("/approvals/{approval_id}")
+def _resolve_edits(a: dict, body: Decision) -> tuple[str | None, list[str], bool]:
+    """What will actually be sent or booked: the principal's edits if any, else the proposal. Returns (draft, attendees, edited)."""
+    draft, attendees, edited = a["draft"], list(a["attendees"] or []), False
+    if a["type"] == "reply" and body.draft is not None:
+        new = body.draft.strip()
+        if not new:
+            raise HTTPException(422, "The reply is empty.")
+        if new != (a["draft"] or "").strip():
+            draft, edited = new, True
+    elif a["type"] == "meeting":
+        if body.attendees is not None:
+            new = [x.strip() for x in body.attendees if x.strip()][:20]
+            for x in new:
+                if "@" in x and not tools._EMAIL.fullmatch(x):
+                    raise HTTPException(422, f"'{x}' is not a valid email address.")
+            if new != attendees:  # the principal chose these, so the thread/domain guard does not apply
+                attendees, edited = new, True
+        else:
+            req = store.get_request(a["requestId"]) if a["requestId"] else None
+            bad = tools.disallowed_attendees(attendees, req) if req else []
+            if bad:
+                raise HTTPException(409, f"{', '.join(bad)} are not on the email thread. Edit the attendees to confirm them.")
+    return draft, attendees, edited
+
+
+@api.post("/approvals/{approval_id}")
 def decide(approval_id: str, body: Decision):
     if body.status not in ("approved", "rejected"):
         raise HTTPException(400, "status must be approved or rejected")
     a = store.get_approval(approval_id)
     if not a:
         raise HTTPException(404, "approval not found")
-    if a["status"] != "pending":
-        raise HTTPException(409, f"already {a['status']}")
-    if body.status == "approved":
-        # Side effect first: if Google fails the approval stays pending and can be retried.
-        ref = _run(lambda: _apply_approved(a))
-        store.update_approval(approval_id, status="approved", **({"googleRef": ref} if ref else {}))
-        log("approval_decided", approvalId=approval_id, status="approved", googleRef=ref)
-        if ref is None:
-            log("signoff_recorded", approvalId=approval_id, type=a["type"])
-    else:
-        store.update_approval(approval_id, status="rejected")
-        log("approval_decided", approvalId=approval_id, status="rejected")
+    note = (body.note or "").strip()[:500] or None
+
+    def already() -> HTTPException:
+        cur = store.get_approval(approval_id)
+        return HTTPException(409, f"already {cur['status'] if cur else 'handled'}")
+
+    if body.status == "rejected":
+        if not store.reject_approval(approval_id, note):
+            raise already()
+        if note and a["type"] in ("reply", "meeting") and a["requestId"]:
+            store.update_request(a["requestId"], processed=False, reject_note=note)  # the agent re-drafts with the reason
+        log("approval_decided", approvalId=approval_id, status="rejected", note=note)
+        return store.get_approval(approval_id)
+
+    # Claim first: only one caller can move pending -> approving, so a double click or retry can never send twice.
+    if not store.claim_approval(approval_id):
+        raise already()
+    try:
+        draft, attendees, edited = _resolve_edits(a, body)
+        ref = _run(lambda: _apply_approved(a, draft, attendees))
+    except Exception:
+        store.release_approval(approval_id)  # nothing happened: back to pending so it can be retried
+        raise
+    # From here the side effect has happened. Never release: a row stuck in 'approving' is safer than a second send.
+    store.finish_approval(
+        approval_id, ref,
+        draft=draft if edited and a["type"] == "reply" else None,
+        attendees=attendees if edited and a["type"] == "meeting" else None,
+        edited=edited,
+    )
+    log("approval_decided", approvalId=approval_id, status="approved", googleRef=ref, edited=edited,
+        **({"original": {"draft": a["draft"], "attendees": a["attendees"]}, "final": {"draft": draft, "attendees": attendees}} if edited else {}))
+    if ref is None:
+        log("signoff_recorded", approvalId=approval_id, type=a["type"])
     return store.get_approval(approval_id)
 
 
-@app.put("/settings")
+@api.put("/settings")
 def save_settings(s: Settings):
     saved = store.save_settings(s.model_dump())
     log("settings_saved")
@@ -158,12 +320,13 @@ def save_settings(s: Settings):
     return saved
 
 
-@app.get("/oauth/google/start")
+@api.get("/oauth/google/start")
 def google_start():
-    return RedirectResponse(_run(google_api.auth_url))
+    # JSON, not a redirect: only a caller holding the API key can start (or replace) the Google connection.
+    return {"url": _run(google_api.auth_url)}
 
 
-@app.get("/oauth/google/callback")
+@app.get("/oauth/google/callback")  # reached by Google's redirect, so no key; the PKCE state ties it to a start call
 def google_callback(code: str | None = None, state: str | None = None, error: str | None = None):
     if error or not code or not state:
         return RedirectResponse(f"{UI_URL}/settings?google_error={error or 'missing_code'}")
@@ -172,3 +335,6 @@ def google_callback(code: str | None = None, state: str | None = None, error: st
     except Exception as e:
         return RedirectResponse(f"{UI_URL}/settings?google_error={str(e)[:120]}")
     return RedirectResponse(f"{UI_URL}/settings?connected=1")
+
+
+app.include_router(api)

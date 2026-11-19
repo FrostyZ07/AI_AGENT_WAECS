@@ -1,13 +1,14 @@
 "use client";
 
 import { useActionState } from "react";
+import { btnPrimary } from "@/components/ui";
 
 // Runs a server action (which returns an error string or null) and shows the error / pending state.
 export default function ActionButton({
   action,
   label,
   pendingLabel = "Working...",
-  className = "rounded bg-foreground px-4 py-2 text-sm text-background",
+  className = btnPrimary,
 }: {
   action: () => Promise<string | null>;
   label: string;
@@ -17,10 +18,14 @@ export default function ActionButton({
   const [error, formAction, pending] = useActionState(async () => action(), null);
   return (
     <form action={formAction} className="inline-block">
-      <button type="submit" disabled={pending} className={`${className} disabled:opacity-50`}>
+      <button type="submit" disabled={pending} className={className}>
         {pending ? pendingLabel : label}
       </button>
-      {error && <p className="mt-2 text-sm text-red-700 dark:text-red-400">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-2 text-sm text-danger">
+          {error}
+        </p>
+      )}
     </form>
   );
 }
