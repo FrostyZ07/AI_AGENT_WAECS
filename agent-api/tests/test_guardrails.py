@@ -542,6 +542,64 @@ def test_automated_invoice_or_itinerary_is_still_escalated(fake, monkeypatch, su
     assert out["skipped"] == [] and [a["type"] for a in fake["approvals"]] == [expected]
 
 
+# ---- daily brief failures ---------------------------------------------------------------
+
+
+@pytest.fixture
+def brief_env(fake, monkeypatch):
+    monkeypatch.setattr(agent, "prepare_upcoming", lambda: None)
+    runs = []
+    monkeypatch.setattr(agent, "generate_brief", lambda email=False: runs.append(email) or {"text": "brief"})
+    return runs
+
+
+def test_failed_brief_alerts_the_principal(fake, brief_env, monkeypatch):
+    def boom(email=False):
+        raise RuntimeError("Gemini quota exhausted")
+
+    monkeypatch.setattr(agent, "generate_brief", boom)
+    with pytest.raises(RuntimeError):
+        main._daily_brief()
+    subject, text = fake["alerts"][0]
+    assert subject == "Your daily brief failed" and "quota" in text and "/brief" in text
+
+
+def test_brief_alert_failure_does_not_hide_the_original_error(fake, brief_env, monkeypatch):
+    monkeypatch.setattr(agent, "generate_brief", lambda email=False: (_ for _ in ()).throw(RuntimeError("gemini down")))
+    monkeypatch.setattr(google_api, "send_to_self", lambda *a: (_ for _ in ()).throw(RuntimeError("gmail down")))
+    with pytest.raises(RuntimeError, match="gemini down"):
+        main._daily_brief()
+
+
+def test_watchdog_retries_a_missed_brief_once(fake, brief_env, monkeypatch):
+    since = []
+    monkeypatch.setattr(store, "brief_emailed_since", lambda ts: since.append(ts) or False)
+    main._brief_watchdog()
+    assert brief_env == [True]  # one emailed brief attempt
+    assert since[0] == NOW - timedelta(minutes=60)
+
+
+def test_watchdog_does_nothing_when_the_brief_went_out(fake, brief_env, monkeypatch):
+    monkeypatch.setattr(store, "brief_emailed_since", lambda ts: True)
+    main._brief_watchdog()
+    assert brief_env == [] and fake["alerts"] == []
+
+
+@pytest.mark.parametrize("brief,check", [("08:00", "8:30"), ("23:45", "0:15")])
+def test_brief_jobs_tolerate_delays_and_get_a_watchdog(fake, monkeypatch, brief, check):
+    from apscheduler.schedulers.background import BackgroundScheduler
+
+    monkeypatch.setattr(main, "scheduler", BackgroundScheduler())
+    monkeypatch.setitem(SETTINGS, "briefTime", brief)
+    main.reschedule()
+    jobs = {j.id: j for j in main.scheduler.get_jobs()}
+    assert set(jobs) == {"poll", "brief", "brief_check"}
+    assert jobs["brief"].misfire_grace_time == 1800 and jobs["brief"].coalesce is True
+    h, m = check.split(":")
+    trig = str(jobs["brief_check"].trigger)
+    assert f"hour='{h}'" in trig and f"minute='{int(m)}'" in trig
+
+
 # ---- leak guards ---------------------------------------------------------------------
 
 

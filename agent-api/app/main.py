@@ -2,7 +2,7 @@ import hmac
 import os
 import re
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, timedelta
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -23,12 +23,40 @@ def _poll_inbox() -> None:
     agent.process_inbox()
 
 
+def _brief_failed_alert(error: str) -> None:
+    """Tell the principal (own inbox) that today's brief did not go out. Gmail may be the thing that failed: log it."""
+    try:
+        google_api.send_to_self(
+            "Your daily brief failed",
+            f"Your daily brief could not be prepared.\nReason: {error[:300]}\nOpen {UI_URL}/brief to generate it by hand.",
+        )
+        log("brief_failure_alert_sent")
+    except Exception as e:
+        log("brief_alert_failed", error=str(e)[:300])
+
+
 def _daily_brief() -> None:
     try:
         agent.prepare_upcoming()  # meeting prep notes first, so the brief can include them
     except Exception as e:
         log("prep_error", error=str(e)[:300])
-    agent.generate_brief(email=True)
+    try:
+        agent.generate_brief(email=True)
+    except Exception as e:
+        log("brief_failed", error=str(e)[:300])
+        _brief_failed_alert(str(e))
+        raise  # _safe logs it as a scheduler error too
+
+
+BRIEF_CHECK_DELAY = 30  # minutes after briefTime
+
+
+def _brief_watchdog() -> None:
+    """Runs BRIEF_CHECK_DELAY minutes after the brief time: if no brief was emailed, try once more (which alerts on failure)."""
+    if store.brief_emailed_since(tools.now() - timedelta(minutes=BRIEF_CHECK_DELAY + 30)):
+        return
+    log("brief_missed")
+    _daily_brief()
 
 
 def _safe(fn):
@@ -45,8 +73,12 @@ def reschedule() -> None:
     s = store.get_settings()
     hh, mm = s["briefTime"].split(":")
     scheduler.add_job(_safe(_poll_inbox), "interval", minutes=int(s["pollMinutes"]), id="poll", replace_existing=True)
+    # A busy or briefly paused process would otherwise skip the brief silently (the default grace is 1 second).
     scheduler.add_job(_safe(_daily_brief), "cron", hour=int(hh), minute=int(mm), timezone=s["timezone"],
-                      id="brief", replace_existing=True)
+                      id="brief", replace_existing=True, misfire_grace_time=1800, coalesce=True)
+    check = (int(hh) * 60 + int(mm) + BRIEF_CHECK_DELAY) % (24 * 60)
+    scheduler.add_job(_safe(_brief_watchdog), "cron", hour=check // 60, minute=check % 60, timezone=s["timezone"],
+                      id="brief_check", replace_existing=True, misfire_grace_time=1800, coalesce=True)
 
 
 @asynccontextmanager

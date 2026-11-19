@@ -208,6 +208,12 @@ def save_brief(text: str) -> dict:
     return get_brief()
 
 
+def brief_emailed_since(ts) -> bool:
+    """Whether a scheduled (emailed) brief went out at or after `ts` (an aware datetime)."""
+    return _q("SELECT 1 AS x FROM audit_log WHERE event = 'brief_generated' AND details->>'emailed' = 'true' "
+              "AND at >= %s LIMIT 1", (ts,), one=True) is not None
+
+
 def get_token() -> dict | None:
     return _q("SELECT token, email FROM oauth_token WHERE id = 1", one=True)
 
