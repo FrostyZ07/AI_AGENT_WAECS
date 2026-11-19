@@ -194,6 +194,17 @@ def _text_body(payload: dict) -> str:
     return _INVISIBLE_CHARS.sub("", text)
 
 
+def _attachment_names(payload: dict, out: list[str] | None = None) -> list[str]:
+    """File names of all attachments (any depth). An invoice is often only a PDF name, so the guardrail checks these."""
+    out = [] if out is None else out
+    name = (payload.get("filename") or "").strip()
+    if name and len(out) < 10:
+        out.append(name[:100])
+    for part in payload.get("parts", []) or []:
+        _attachment_names(part, out)
+    return out
+
+
 def fetch_new_mail(max_results: int = 20) -> int:
     """Pull recent inbox mail into the requests table. Read-only: never modifies the mailbox. Returns count added."""
     gmail = _svc("gmail", "v1")
@@ -218,7 +229,7 @@ def fetch_new_mail(max_results: int = 20) -> int:
         # Everyone on the thread: the only people the agent may invite or mention without the principal adding them.
         participants = sorted({a.lower() for _, a in getaddresses([_header(p, h) for h in ("From", "To", "Cc")]) if a})
         store.upsert_request(msg["id"], msg["threadId"], _header(p, "Message-ID"), sender, subject, body, received, kind,
-                             participants)
+                             participants, attachments=_attachment_names(p))
         added += 1
     if added:
         store.log("mail_fetched", count=added)

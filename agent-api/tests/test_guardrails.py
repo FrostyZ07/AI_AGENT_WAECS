@@ -137,6 +137,42 @@ def test_classify_flags_payment_travel_and_keywords(fake):
     assert tools.classify_sensitive(req("d", "Lunch?", "free thursday")) is None
 
 
+@pytest.mark.parametrize("files", [["INV-2026-11.pdf"], ["scan.png", "Invoice_Nov.pdf"], ["Bill_0042.pdf"],
+                                   ["receipt #12.pdf"], ["Quotation v2.xlsx"], ["PurchaseOrder.docx"]])
+def test_payment_attachments_are_escalated_under_a_bland_subject(fake, files):
+    assert tools.classify_sensitive({**req("a", "Hi", "see attached"), "attachments": files}) == "payment"
+
+
+def test_harmless_attachments_and_names_are_not_flagged(fake):
+    assert tools.classify_sensitive({**req("a", "Hi Bill", "confirming receipt of your mail"),
+                                     "attachments": ["agenda.pdf", "photo.jpg"]}) is None
+    assert tools.classify_sensitive(req("b", "Notes", "no attachments field at all")) is None
+
+
+def test_attachment_names_are_collected_from_nested_parts():
+    payload = {"mimeType": "multipart/mixed", "parts": [
+        {"mimeType": "multipart/alternative", "parts": [{"mimeType": "text/plain", "filename": ""}]},
+        {"mimeType": "application/pdf", "filename": "INV-1.pdf"},
+        {"mimeType": "multipart/mixed", "parts": [{"mimeType": "image/png", "filename": " logo.png "}]},
+    ]}
+    assert google_api._attachment_names(payload) == ["INV-1.pdf", "logo.png"]
+
+
+def test_model_sees_attachment_names_inside_the_fence(fake, monkeypatch):
+    seen = []
+
+    class Capture(FakeGemini):
+        def generate_content(self, **kw):
+            seen.append(kw["contents"][0].parts[0].text)
+            return super().generate_content(**kw)
+
+    fake["requests"]["m"] = {**req("m", "Hello", "hi"), "attachments": ["agenda.pdf"]}
+    monkeypatch.setattr(agent, "_client", lambda: Capture(gemini_reply()))
+    agent.process_inbox()
+    fenced = seen[0].split("<<<END EMAIL>>>")[0]
+    assert "Attachments: agenda.pdf" in fenced
+
+
 def test_model_cannot_downgrade_flagged_request(fake):
     fake["requests"]["r"] = req("r", "Invoice", "payment due", triage="sensitive")
     fake["requests"]["q"] = req("q", "Invoice", "payment due")

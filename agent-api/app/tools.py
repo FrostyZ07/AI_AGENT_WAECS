@@ -71,7 +71,9 @@ def _open_approval(request_id: str, type_: str) -> dict | None:
 
 # ---- code-level guardrail -------------------------------------------------
 
-_PAYMENT = re.compile(r"invoice|payment|\bpay\b|wire transfer|\bRs\b|₹|\bINR\b", re.I)
+# "bill"/"receipt" only as document numbers (Bill_0042.pdf, receipt #12): "Hi Bill" or "confirming receipt" are not payments.
+_PAYMENT = re.compile(r"invoice|payment|\bpay\b|wire transfer|\bRs\b|₹|\bINR\b|quotation|purchase.?order"
+                      r"|\b(?:inv|bill|receipt)[-_ #]*(?:no\.?\s*)?\d", re.I)
 _TRAVEL = re.compile(r"flight|hotel|airline|boarding|itinerary|train ticket", re.I)
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
@@ -80,8 +82,9 @@ def classify_sensitive(req: dict) -> str | None:
     """Return 'payment' | 'travel' | 'sensitive' if the request must be escalated, else None.
 
     Runs in code before the model sees the request, so the model cannot talk its way past it.
+    Attachment file names count too: an invoice often arrives as "INV-0042.pdf" under a bland subject.
     """
-    text = f"{req['subject']} {req['body']}"
+    text = f"{req['subject']} {req['body']} {' '.join(req.get('attachments') or [])}"
     if _TRAVEL.search(text):
         return "travel"
     if _PAYMENT.search(text):

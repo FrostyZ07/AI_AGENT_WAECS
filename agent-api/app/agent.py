@@ -68,7 +68,8 @@ def process_request(client: genai.Client, req: dict) -> str | None:
     """Run the agent on one request. Returns why it was left unhandled, or None."""
     forced = classify_sensitive(req)  # guardrail runs in code, before the model
     # Everything the sender controls (From, Subject, body) goes inside the fence: it is data, never instructions.
-    email = fence("EMAIL", f"From: {req['from']}\nSubject: {req['subject']}\n\n{req['body']}")
+    files = ", ".join(req.get("attachments") or []) or "none"
+    email = fence("EMAIL", f"From: {req['from']}\nSubject: {req['subject']}\nAttachments: {files}\n\n{req['body']}")
     prompt = f"{email}\n\nType: {req['kind']}\nRequest id: {req['id']}"
     if req.get("rejectNote"):  # written by the principal, so it sits outside the fence
         prompt += f"\n\nThe principal REJECTED your earlier proposal for this request. Reason: {req['rejectNote']}\nMake a new proposal that follows this reason."

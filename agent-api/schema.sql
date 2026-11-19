@@ -13,7 +13,8 @@ create table if not exists requests (
   processed boolean not null default false,
   participants jsonb,                  -- From/To/Cc addresses
   reject_note text,                    -- principal's reason when a proposal was rejected
-  attempts int not null default 0      -- failed agent runs; at 3 the request goes to the principal for review
+  attempts int not null default 0,     -- failed agent runs; at 3 the request goes to the principal for review
+  attachments jsonb                    -- attachment file names (checked by the payment/travel guardrail)
 );
 
 create table if not exists approvals (
