@@ -132,6 +132,8 @@ def client(fake):
 
 def test_classify_flags_payment_travel_and_keywords(fake):
     assert tools.classify_sensitive(req("a", "Invoice #1", "pay Rs 500")) == "payment"
+    assert tools.classify_sensitive(req("a2", "Reminder", "Payment due on Friday")) == "payment"
+    assert tools.classify_sensitive(req("a3", "Hi", "your bill is overdue, please pay now")) == "payment"
     assert tools.classify_sensitive(req("b", "Flight options")) == "travel"
     assert tools.classify_sensitive(req("c", "Hi", "this is confidential")) == "sensitive"
     assert tools.classify_sensitive(req("d", "Lunch?", "free thursday")) is None
@@ -147,6 +149,9 @@ def test_harmless_attachments_and_names_are_not_flagged(fake):
     assert tools.classify_sensitive({**req("a", "Hi Bill", "confirming receipt of your mail"),
                                      "attachments": ["agenda.pdf", "photo.jpg"]}) is None
     assert tools.classify_sensitive(req("b", "Notes", "no attachments field at all")) is None
+    # contest/offer mail that merely mentions money is not a payment request
+    assert tools.classify_sensitive(req("c", "Shortlisted: Agent Maker-2026",
+                                        "Paid internship, stipend Rs 20,000 / INR 20000 / ₹20,000; payment details later")) is None
 
 
 def test_attachment_names_are_collected_from_nested_parts():

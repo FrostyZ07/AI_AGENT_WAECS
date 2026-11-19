@@ -21,7 +21,32 @@ const statusTone = { pending: 'warning', approving: 'warning', approved: 'succes
 const field =
   'w-full rounded-lg border border-[#e4dac6] bg-[#fcfaf5] px-3 py-2 text-[14px] outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 dark:border-zinc-700 dark:bg-zinc-900 dark:focus:border-indigo-400'
 
-export default function ApprovalCard({ a }: { a: Approval }) {
+// Opens the mailbox the assistant is connected to, not whichever Google account the browser has first.
+// Gmail only takes a number in /u/N/, so the account goes in ?authuser= instead.
+const gmail = 'https://mail.google.com/mail/'
+
+// "Name <a@b.com>" -> "a@b.com"
+function address(from: string) {
+  return from.match(/<([^>]+)>/)?.[1] ?? from.trim()
+}
+
+// Gmail's web URLs don't accept API ids, but searching the Message-ID header finds exactly that email.
+function gmailMessageUrl(account: string | null | undefined, a: Approval) {
+  // in:anywhere so it is still found if archived, trashed or marked spam.
+  const q = a.messageId
+    ? `in:anywhere rfc822msgid:${a.messageId.replace(/^<|>$/g, '')}`
+    : `in:anywhere from:${address(a.from ?? '')}${a.subject ? ` subject:(${a.subject.replace(/["()]/g, ' ')})` : ''}`
+  return `${gmail}${account ? `?authuser=${encodeURIComponent(account)}` : ''}#search/${encodeURIComponent(q)}`
+}
+
+function gmailComposeUrl(account: string | null | undefined, from: string, subject: string | null | undefined, body: string) {
+  const su = /^re:/i.test(subject ?? '') ? subject! : `Re: ${subject ?? ''}`
+  const p = new URLSearchParams({ view: 'cm', fs: '1', to: address(from), su, body })
+  if (account) p.set('authuser', account)
+  return `${gmail}?${p}`
+}
+
+export default function ApprovalCard({ a, account }: { a: Approval; account?: string | null }) {
   const isFlagged = flagged.includes(a.type)
   const Icon = typeIcon[a.type]
   const open = a.status === 'pending'
@@ -95,6 +120,11 @@ export default function ApprovalCard({ a }: { a: Approval }) {
               </summary>
               <div className="mt-2">
                 <NoteBox label={a.subject || '(no subject)'}>{a.body || '(empty)'}</NoteBox>
+                {(
+                  <a href={gmailMessageUrl(account, a)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-teal-700 underline dark:text-indigo-300">
+                    Open in Gmail
+                  </a>
+                )}
               </div>
             </details>
           )}
@@ -217,6 +247,17 @@ export default function ApprovalCard({ a }: { a: Approval }) {
                   <button type="button" disabled={pending} onClick={() => setRejecting(true)} className={linkButtonClass('secondary')}>
                     Reject
                   </button>
+                )}
+                {!rejecting && a.type === 'reply' && a.from && (
+                  <a
+                    href={gmailComposeUrl(account, a.from, a.subject, draft)}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Opens this draft in Gmail. Sending it there does not close this card: reject it afterwards."
+                    className={linkButtonClass('secondary')}
+                  >
+                    Edit in Gmail
+                  </a>
                 )}
               </div>
               {error && (

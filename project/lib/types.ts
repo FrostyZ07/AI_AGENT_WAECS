@@ -63,6 +63,7 @@ export type Approval = {
   subject?: string | null;
   body?: string | null;
   receivedAt?: string | null;
+  messageId?: string | null; // the email's Message-ID header, used to open it in Gmail
 };
 
 export type FollowUp = {

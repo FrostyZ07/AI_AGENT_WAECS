@@ -71,8 +71,15 @@ def _open_approval(request_id: str, type_: str) -> dict | None:
 
 # ---- code-level guardrail -------------------------------------------------
 
-# "bill"/"receipt" only as document numbers (Bill_0042.pdf, receipt #12): "Hi Bill" or "confirming receipt" are not payments.
-_PAYMENT = re.compile(r"invoice|payment|\bpay\b|wire transfer|\bRs\b|₹|\bINR\b|quotation|purchase.?order"
+# Only money *owed or requested*: invoices/bills/quotes/POs, "payment due", "amount overdue", "pay now".
+# Bare currency (Rs, INR, a rupee sign), "pay", "paid" and "payment" alone are NOT enough: a stipend or prize
+# announcement mentions them without asking for anything. "bill"/"receipt" only as document numbers
+# (Bill_0042.pdf, receipt #12): "Hi Bill" or "confirming receipt" are not payments.
+_PAYMENT = re.compile(r"invoice|wire transfer|quotation|purchase.?order"
+                      r"|\b(?:payment|amount|balance|bill|fees?)\s+(?:is\s+|are\s+)?(?:due|overdue|pending|outstanding|reminder|request)"
+                      r"|\b(?:overdue|outstanding)\s+(?:payment|amount|balance|bill)"
+                      r"|\bbill\s+payment|\bpayment\s+(?:link|failed|reminder|request|receipt)"
+                      r"|\bplease\s+pay\b|\bpay\s+(?:now|by|before)\b"
                       r"|\b(?:inv|bill|receipt)[-_ #]*(?:no\.?\s*)?\d", re.I)
 _TRAVEL = re.compile(r"flight|hotel|airline|boarding|itinerary|train ticket", re.I)
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")

@@ -109,7 +109,7 @@ _APR_SELECT = (
     'a.start, a."end", a.attendees, a.google_ref AS "googleRef", '
     'to_char(a.meeting_date, \'YYYY-MM-DD\') AS "meetingDate", a.edited, a.decision_note AS "decisionNote", '
     'to_char(a.created_at AT TIME ZONE %(tz)s, \'DD Mon HH24:MI\') AS "createdAt", '
-    'r.from_addr AS "from", r.subject AS "subject", left(r.body, 1500) AS "body", '
+    'r.from_addr AS "from", r.subject AS "subject", left(r.body, 1500) AS "body", r.message_id AS "messageId", '
     'to_char(r.received_at AT TIME ZONE %(tz)s, \'DD Mon HH24:MI\') AS "receivedAt" '
     'FROM approvals a LEFT JOIN requests r ON r.id = a.request_id'
 )
