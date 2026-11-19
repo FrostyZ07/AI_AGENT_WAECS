@@ -1,5 +1,6 @@
 'use client'
 
+import { useSyncExternalStore } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { CalendarDays, Check, LayoutDashboard, LogOut, ScrollText, Settings2, Sparkles } from 'lucide-react'
@@ -16,8 +17,14 @@ const navigation = [
 
 const active = 'bg-teal-50 text-teal-700 dark:bg-indigo-400/10 dark:text-indigo-300'
 
+const noop = () => () => {}
+
 export default function AppSidebar({ pendingApprovals }: { pendingApprovals: number }) {
+  // The prerendered shell doesn't know the URL, so the first client render must match it (no active link);
+  // the active link is applied right after hydration. Avoids a hydration mismatch on aria-current/className.
+  const hydrated = useSyncExternalStore(noop, () => true, () => false)
   const pathname = usePathname()
+  const current = hydrated ? pathname : null
   return (
     <>
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-[248px] flex-col border-r border-[#e4dac6] bg-[#fcfaf5] px-4 py-6 dark:border-zinc-800 dark:bg-[#111114] md:flex">
@@ -26,7 +33,7 @@ export default function AppSidebar({ pendingApprovals }: { pendingApprovals: num
         </Link>
         <nav aria-label="Main navigation" className="flex flex-col gap-1">
           {navigation.map(({ label, href, icon: Icon }) => {
-            const isActive = pathname === href
+            const isActive = current === href
             return (
               <Link
                 key={href}
@@ -68,7 +75,7 @@ export default function AppSidebar({ pendingApprovals }: { pendingApprovals: num
         </div>
         <nav aria-label="Main navigation" className="flex gap-1 overflow-x-auto pb-0.5">
           {navigation.map(({ label, href, icon: Icon }) => {
-            const isActive = pathname === href
+            const isActive = current === href
             return (
               <Link
                 key={href}

@@ -36,7 +36,8 @@ export type Meeting = {
   allDay?: boolean; // Phase 3: set for all-day Google Calendar events
 };
 
-export type ApprovalType = "reply" | "meeting" | "payment" | "travel" | "sensitive";
+// "review" = mail the assistant could not handle (no answer from the model, or repeated failures): the principal looks at it.
+export type ApprovalType = "reply" | "meeting" | "payment" | "travel" | "sensitive" | "review";
 // "approving" = the send/booking is in progress or was interrupted: never offered for approval again.
 export type ApprovalStatus = "pending" | "approving" | "approved" | "rejected";
 
@@ -62,6 +63,7 @@ export type Approval = {
   subject?: string | null;
   body?: string | null;
   receivedAt?: string | null;
+  messageId?: string | null; // the email's Message-ID header, used to open it in Gmail
 };
 
 export type FollowUp = {

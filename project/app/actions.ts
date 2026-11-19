@@ -34,6 +34,10 @@ export async function saveSettingsAction(settings: Settings) {
   return run("/settings", "PUT", settings);
 }
 
+export async function disconnectGoogleAction() {
+  return run("/oauth/google/disconnect", "POST");
+}
+
 export async function prepMeetingAction(eventId: string) {
   return run(`/meetings/${encodeURIComponent(eventId)}/prep`, "POST");
 }

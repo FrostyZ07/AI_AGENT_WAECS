@@ -184,7 +184,7 @@ export default async function BriefPage() {
             {pendingApprovals.length > 0 ? (
               <ul className="flex flex-col gap-2">
                 {pendingApprovals.slice(0, 4).map((a) => {
-                  const flagged = ['payment', 'travel', 'sensitive'].includes(a.type)
+                  const flagged = ['payment', 'travel', 'sensitive', 'review'].includes(a.type)
                   return (
                     <li key={a.id} className="flex items-start gap-3 rounded-lg border border-[#e4dac6]/80 px-3 py-3 dark:border-zinc-800">
                       <span className={`mt-0.5 grid size-7 shrink-0 place-items-center rounded-md ${flagged ? iconTile.danger : iconTile.info}`}>

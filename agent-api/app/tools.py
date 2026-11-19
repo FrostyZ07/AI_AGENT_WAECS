@@ -26,8 +26,30 @@ def _hhmm(mins: int) -> str:
     return f"{mins // 60:02d}:{mins % 60:02d}"
 
 
+def now() -> datetime:
+    """Current time in the principal's timezone. The one clock the guardrails use (tests replace it)."""
+    return datetime.now(ZoneInfo(store.get_settings()["timezone"]))
+
+
 def today() -> date:
-    return datetime.now(ZoneInfo(store.get_settings()["timezone"])).date()
+    return now().date()
+
+
+def slot_start(day: date | int, hhmm: str) -> datetime:
+    """Absolute start of a slot: a date (or day offset from today) plus "HH:MM", in the principal's timezone."""
+    d = today() + timedelta(days=day) if isinstance(day, int) else day
+    h, m = hhmm.split(":")
+    return datetime(d.year, d.month, d.day, int(h), int(m), tzinfo=now().tzinfo)
+
+
+def _earliest() -> datetime:
+    """The first moment the agent may propose a meeting for: now plus the minimum-notice setting."""
+    return now() + timedelta(minutes=int(store.get_settings().get("minNoticeMinutes", 120)))
+
+
+def _is_working_day(day: int) -> bool:
+    days = store.get_settings().get("workingDays", [0, 1, 2, 3, 4])
+    return (today() + timedelta(days=day)).weekday() in days
 
 
 def _busy(day: int) -> list[tuple[int, int]]:
@@ -49,7 +71,16 @@ def _open_approval(request_id: str, type_: str) -> dict | None:
 
 # ---- code-level guardrail -------------------------------------------------
 
-_PAYMENT = re.compile(r"invoice|payment|\bpay\b|wire transfer|\bRs\b|₹|\bINR\b", re.I)
+# Only money *owed or requested*: invoices/bills/quotes/POs, "payment due", "amount overdue", "pay now".
+# Bare currency (Rs, INR, a rupee sign), "pay", "paid" and "payment" alone are NOT enough: a stipend or prize
+# announcement mentions them without asking for anything. "bill"/"receipt" only as document numbers
+# (Bill_0042.pdf, receipt #12): "Hi Bill" or "confirming receipt" are not payments.
+_PAYMENT = re.compile(r"invoice|wire transfer|quotation|purchase.?order"
+                      r"|\b(?:payment|amount|balance|bill|fees?)\s+(?:is\s+|are\s+)?(?:due|overdue|pending|outstanding|reminder|request)"
+                      r"|\b(?:overdue|outstanding)\s+(?:payment|amount|balance|bill)"
+                      r"|\bbill\s+payment|\bpayment\s+(?:link|failed|reminder|request|receipt)"
+                      r"|\bplease\s+pay\b|\bpay\s+(?:now|by|before)\b"
+                      r"|\b(?:inv|bill|receipt)[-_ #]*(?:no\.?\s*)?\d", re.I)
 _TRAVEL = re.compile(r"flight|hotel|airline|boarding|itinerary|train ticket", re.I)
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 
@@ -58,8 +89,9 @@ def classify_sensitive(req: dict) -> str | None:
     """Return 'payment' | 'travel' | 'sensitive' if the request must be escalated, else None.
 
     Runs in code before the model sees the request, so the model cannot talk its way past it.
+    Attachment file names count too: an invoice often arrives as "INV-0042.pdf" under a bland subject.
     """
-    text = f"{req['subject']} {req['body']}"
+    text = f"{req['subject']} {req['body']} {' '.join(req.get('attachments') or [])}"
     if _TRAVEL.search(text):
         return "travel"
     if _PAYMENT.search(text):
@@ -155,19 +187,23 @@ def get_calendar(from_day: int, to_day: int) -> dict:
 
 
 def find_free_slots(day: int, duration_min: int) -> dict:
-    """Find free start times on a day, inside working hours, that do not clash with any meeting or pending proposal.
+    """Find free start times on a working day, inside working hours, that do not clash with any meeting or pending
+    proposal and give the principal enough notice.
 
     Args:
         day: Day offset (0 = today, 1 = tomorrow).
         duration_min: Meeting length in minutes.
     """
+    if not _is_working_day(day):
+        return {"day": day, "freeSlots": [], "note": "not a working day; try another day"}
     wh = store.get_settings()["workingHours"]
     start, end = _mins(wh["start"]), _mins(wh["end"])
     busy = _busy(day)
+    earliest = _earliest()
     slots = []
     t = start
     while t + duration_min <= end:
-        if all(t + duration_min <= b0 or t >= b1 for b0, b1 in busy):
+        if slot_start(day, _hhmm(t)) >= earliest and all(t + duration_min <= b0 or t >= b1 for b0, b1 in busy):
             slots.append({"start": _hhmm(t), "end": _hhmm(t + duration_min)})
         t += 30
     return {"day": day, "freeSlots": slots}
@@ -224,6 +260,12 @@ def propose_meeting(request_id: str, title: str, day: int, start: str, end: str,
         return {"error": "day must be today or later"}
     if day > MAX_DAYS_AHEAD:
         return {"error": f"day must be within {MAX_DAYS_AHEAD} days"}
+    if not _is_working_day(day):
+        return {"error": "that is not a working day; call find_free_slots for another day"}
+    if slot_start(day, start) < now():
+        return {"error": "that time has already passed; call find_free_slots"}
+    if slot_start(day, start) < _earliest():
+        return {"error": "too soon: the principal needs more notice; call find_free_slots"}
     bad = disallowed_attendees(attendees, req)
     if bad:
         return {"error": f"{', '.join(bad)} are not on the email thread; only invite people from the thread"}

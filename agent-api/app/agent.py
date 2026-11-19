@@ -12,11 +12,12 @@ from google.genai import types
 from app import google_api, store
 from app.prompt import BRIEF_PROMPT, PREP_PROMPT, build_system_prompt, fence
 from app.store import log
-from app.tools import TOOL_MAP, TOOLS, classify_sensitive, escalate, today
+from app.tools import TOOL_MAP, TOOLS, _alert_principal, classify_sensitive, escalate, today
 
 load_dotenv()
 
 MAX_STEPS = 6
+MAX_ATTEMPTS = 3  # a request that errors this many times goes to the principal for review
 
 # A manual run and a scheduled run must not process the same mail twice.
 _inbox_lock = threading.Lock()
@@ -30,17 +31,45 @@ def _client() -> genai.Client:
     key = os.getenv("GEMINI_API_KEY")
     if not key:
         raise MissingKey("GEMINI_API_KEY is not set. Add it to agent-api/.env and restart the API.")
-    return genai.Client(api_key=key)
+    # A hung call would hold the inbox lock forever; transient 429/5xx errors are retried with backoff.
+    return genai.Client(api_key=key, http_options=types.HttpOptions(
+        timeout=int(os.getenv("GEMINI_TIMEOUT_MS", "60000")),
+        retry_options=types.HttpRetryOptions(attempts=3, http_status_codes=[408, 429, 500, 502, 503, 504]),
+    ))
 
 
 def _model() -> str:
     return os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
 
-def process_request(client: genai.Client, req: dict) -> None:
+def flag_for_review(req: dict, reason: str) -> None:
+    """Hand a request the agent could not handle to the principal, so no mail is silently dropped."""
+    a = store.add_approval("review", f"Needs your review: {req['subject'][:150]} (from {req['from']})", request_id=req["id"])
+    log("needs_review", requestId=req["id"], reason=reason[:300])
+    if not a.get("duplicate"):
+        _alert_principal("review", req)
+
+
+def _unhandled_reason(resp, handled: set[str], forced: str | None, hit_limit: bool) -> str | None:
+    """Why the agent's run did not deal with the request, or None if it did."""
+    if hit_limit:
+        return f"step limit ({MAX_STEPS}) reached"
+    if not resp.candidates:
+        return "the model returned no answer"
+    finish = resp.candidates[0].finish_reason
+    if finish not in (None, types.FinishReason.STOP):
+        return f"the model stopped early ({getattr(finish, 'name', finish)})"
+    if not forced and not handled & {"set_triage", "escalate"}:  # forced requests are escalated by the backstop
+        return "the model did not triage the request"
+    return None
+
+
+def process_request(client: genai.Client, req: dict) -> str | None:
+    """Run the agent on one request. Returns why it was left unhandled, or None."""
     forced = classify_sensitive(req)  # guardrail runs in code, before the model
     # Everything the sender controls (From, Subject, body) goes inside the fence: it is data, never instructions.
-    email = fence("EMAIL", f"From: {req['from']}\nSubject: {req['subject']}\n\n{req['body']}")
+    files = ", ".join(req.get("attachments") or []) or "none"
+    email = fence("EMAIL", f"From: {req['from']}\nSubject: {req['subject']}\nAttachments: {files}\n\n{req['body']}")
     prompt = f"{email}\n\nType: {req['kind']}\nRequest id: {req['id']}"
     if req.get("rejectNote"):  # written by the principal, so it sits outside the fence
         prompt += f"\n\nThe principal REJECTED your earlier proposal for this request. Reason: {req['rejectNote']}\nMake a new proposal that follows this reason."
@@ -53,12 +82,14 @@ def process_request(client: genai.Client, req: dict) -> None:
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
     contents = [types.Content(role="user", parts=[types.Part.from_text(text=prompt)])]
+    handled: set[str] = set()  # tools that ran without an error
+    hit_limit = False
 
     for _ in range(MAX_STEPS):
         resp = client.models.generate_content(model=_model(), contents=contents, config=config)
         calls = resp.function_calls or []
         if not calls:
-            log("agent_done", requestId=req["id"], note=(resp.text or "")[:200])
+            log("agent_done", requestId=req["id"], note=(resp.text or "")[:200] if resp.candidates else "")
             break
         contents.append(resp.candidates[0].content)
         parts = []
@@ -70,9 +101,12 @@ def process_request(client: genai.Client, req: dict) -> None:
             except TypeError as e:
                 result = {"error": f"bad arguments: {e}"}
             log("tool_call", requestId=req["id"], tool=call.name, args=args, result=result)
+            if isinstance(result, dict) and "error" not in result:
+                handled.add(call.name)
             parts.append(types.Part.from_function_response(name=call.name, response={"result": result}))
         contents.append(types.Content(role="user", parts=parts))
     else:
+        hit_limit = True
         log("agent_step_limit", requestId=req["id"])
 
     # Guardrail backstop: flagged requests must end up escalated, whatever the model did.
@@ -80,24 +114,49 @@ def process_request(client: genai.Client, req: dict) -> None:
         escalate(req["id"], forced, f"{forced.title()} item: {req['subject']}")
         log("guardrail_escalation", requestId=req["id"], category=forced)
 
+    return _unhandled_reason(resp, handled, forced, hit_limit)
+
 
 def process_inbox() -> dict:
-    """Fetch new Gmail, then run the agent on every unprocessed request."""
+    """Fetch new Gmail, then run the agent on every unprocessed request. Returns {"busy": True} if a run is in progress."""
     client = _client()
-    with _inbox_lock:
+    if not _inbox_lock.acquire(blocking=False):  # never queue behind a running (or stuck) run
+        return {"busy": True}
+    try:
         fetched = google_api.fetch_new_mail()
-        done, failed = [], []
+        done, failed, review, skipped = [], [], [], []
         for req in store.list_requests():
             if req["processed"]:
                 continue
+            # Newsletters and no-reply mail need no answer. An automated invoice or itinerary still goes through,
+            # so the payment/travel sign-off rule keeps applying.
+            if req.get("automated") and not classify_sensitive(req):
+                store.update_request(req["id"], processed=True, kind="bulk")
+                skipped.append(req["id"])
+                continue
             try:
-                process_request(client, req)
+                unhandled = process_request(client, req)
+                if unhandled:
+                    flag_for_review(req, unhandled)
+                    review.append(req["id"])
                 store.update_request(req["id"], processed=True, reject_note=None)
                 done.append(req["id"])
             except Exception as e:  # keep going; one bad request must not block the rest
-                log("agent_error", requestId=req["id"], error=str(e)[:300])
-                failed.append({"id": req["id"], "error": str(e)[:300]})
-        return {"fetched": fetched, "processed": done, "failed": failed}
+                err = str(e)[:300]
+                log("agent_error", requestId=req["id"], error=err)
+                failed.append({"id": req["id"], "error": err})
+                try:  # stop retrying (and paying for) a request that keeps failing: the principal takes it
+                    if store.bump_attempts(req["id"]) >= MAX_ATTEMPTS:
+                        flag_for_review(req, f"failed {MAX_ATTEMPTS} times: {err}")
+                        store.update_request(req["id"], processed=True, reject_note=None)
+                        review.append(req["id"])
+                except Exception as e2:
+                    log("review_flag_error", requestId=req["id"], error=str(e2)[:300])
+        if skipped:
+            log("mail_skipped", count=len(skipped))
+        return {"fetched": fetched, "processed": done, "failed": failed, "review": review, "skipped": skipped}
+    finally:
+        _inbox_lock.release()
 
 
 def prepare_meeting(client: genai.Client, event: dict) -> dict:

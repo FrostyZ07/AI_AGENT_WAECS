@@ -14,6 +14,7 @@ from email.utils import getaddresses, parseaddr, parsedate_to_datetime
 from html.parser import HTMLParser
 from zoneinfo import ZoneInfo
 
+import requests
 from google.auth.transport.requests import Request as GRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -99,6 +100,20 @@ def creds() -> Credentials:
     return c
 
 
+def disconnect() -> None:
+    """Forget the stored Google token, after asking Google to revoke it (best effort: we delete it either way)."""
+    row = store.get_token()
+    if not row:
+        return
+    token = row["token"].get("refresh_token") or row["token"].get("token")
+    try:
+        requests.post("https://oauth2.googleapis.com/revoke", params={"token": token}, timeout=10)
+    except Exception:
+        pass
+    store.delete_token()
+    store.log("google_disconnected", email=row["email"])
+
+
 def status() -> dict:
     row = store.get_token()
     return {"connected": bool(row), "email": row["email"] if row else None}
@@ -122,26 +137,49 @@ def _header(payload: dict, name: str) -> str:
     return next((h["value"] for h in payload.get("headers", []) if h["name"].lower() == name.lower()), "")
 
 
+_VOID = {"br", "img", "hr", "meta", "link", "input", "wbr", "area", "base", "col", "embed", "source", "track"}
+_HIDDEN_TAGS = {"script", "style", "head", "title", "template", "noscript"}
+# Text a reader never sees is the usual carrier for prompt injection, so it never reaches the model.
+_HIDDEN_STYLE = re.compile(
+    r"display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0(?:\.0+)?(?:px|pt|em|rem|%)?\s*(?:;|!|$)"
+    r"|opacity\s*:\s*0(?:\.0+)?\s*(?:;|!|$)|max-height\s*:\s*0(?:px)?\s*(?:;|!|$)", re.I)
+_INVISIBLE_CHARS = re.compile("[​-‏‪-‮⁠-⁤﻿]")
+
+
 class _HtmlText(HTMLParser):
-    """Tiny HTML -> text converter for HTML-only mail (stdlib, no extra dependency)."""
+    """Tiny HTML -> text converter for HTML-only mail (stdlib, no extra dependency). Drops text hidden from the reader."""
 
     def __init__(self):
         super().__init__()
         self.out: list[str] = []
-        self._skip = 0
+        self._stack: list[tuple[str, bool]] = []  # (tag, hidden) for every open non-void element
+
+    def _hidden(self) -> bool:
+        return bool(self._stack) and self._stack[-1][1]
 
     def handle_starttag(self, tag, attrs):
-        if tag in ("script", "style"):
-            self._skip += 1
-        elif tag in ("br", "p", "div", "tr", "li"):
+        if tag in ("br", "p", "div", "tr", "li"):
+            self.out.append("\n")
+        if tag in _VOID:
+            return
+        a = {k.lower(): (v or "") for k, v in attrs}
+        hidden = (self._hidden() or tag in _HIDDEN_TAGS or "hidden" in a
+                  or a.get("aria-hidden", "").lower() == "true" or bool(_HIDDEN_STYLE.search(a.get("style", ""))))
+        self._stack.append((tag, hidden))
+
+    def handle_startendtag(self, tag, attrs):  # <div/>: opens and closes at once, so nothing to push
+        if tag in ("br", "p", "div", "tr", "li"):
             self.out.append("\n")
 
     def handle_endtag(self, tag):
-        if tag in ("script", "style") and self._skip:
-            self._skip -= 1
+        # Pop up to the matching open tag; a stray closing tag (broken HTML) is ignored.
+        for i in range(len(self._stack) - 1, -1, -1):
+            if self._stack[i][0] == tag:
+                del self._stack[i:]
+                return
 
     def handle_data(self, data):
-        if not self._skip:
+        if not self._hidden():
             self.out.append(data)
 
 
@@ -156,23 +194,53 @@ def _find_part(payload: dict, mime: str) -> str:
 
 
 def _text_body(payload: dict) -> str:
-    """Best-effort text extraction from a Gmail message payload: text/plain, else the HTML part with tags stripped."""
+    """Best-effort text extraction from a Gmail message payload: text/plain, else the HTML part with tags stripped.
+
+    Zero-width and bidi control characters are removed either way (they hide or disguise text).
+    """
     text = _find_part(payload, "text/plain")
-    if text:
-        return text
-    html = _find_part(payload, "text/html")
-    if not html:
-        return ""
-    parser = _HtmlText()
-    parser.feed(html)
-    return re.sub(r"\n\s*\n+", "\n\n", "".join(parser.out))
+    if not text:
+        html = _find_part(payload, "text/html")
+        if not html:
+            return ""
+        parser = _HtmlText()
+        parser.feed(html)
+        text = re.sub(r"\n\s*\n+", "\n\n", "".join(parser.out))
+    return _INVISIBLE_CHARS.sub("", text)
+
+
+def _attachment_names(payload: dict, out: list[str] | None = None) -> list[str]:
+    """File names of all attachments (any depth). An invoice is often only a PDF name, so the guardrail checks these."""
+    out = [] if out is None else out
+    name = (payload.get("filename") or "").strip()
+    if name and len(out) < 10:
+        out.append(name[:100])
+    for part in payload.get("parts", []) or []:
+        _attachment_names(part, out)
+    return out
+
+
+_AUTOMATED_SENDER = re.compile(r"^(?:no[-_.]?reply|do[-_.]?not[-_.]?reply|mailer[-_.]?daemon|notifications?|newsletters?)\b", re.I)
+
+
+def is_automated(payload: dict, sender: str) -> bool:
+    """Newsletters, mailing lists, auto-replies and no-reply senders: mail no person is waiting on an answer to."""
+    if _header(payload, "List-Unsubscribe") or _header(payload, "List-Id"):
+        return True
+    if _header(payload, "Precedence").strip().lower() in ("bulk", "list", "junk"):
+        return True
+    auto = _header(payload, "Auto-Submitted").strip().lower()
+    if auto and auto != "no":
+        return True
+    return bool(_AUTOMATED_SENDER.match(sender.split("@")[0]))
 
 
 def fetch_new_mail(max_results: int = 20) -> int:
     """Pull recent inbox mail into the requests table. Read-only: never modifies the mailbox. Returns count added."""
     gmail = _svc("gmail", "v1")
     me = principal_email().lower()
-    refs = gmail.users().messages().list(userId="me", q="in:inbox newer_than:2d -from:me", maxResults=max_results).execute()
+    q = "in:inbox newer_than:2d -from:me -category:promotions -category:social"
+    refs = gmail.users().messages().list(userId="me", q=q, maxResults=max_results).execute()
     added = 0
     for ref in refs.get("messages", []):
         if store.request_exists(ref["id"]):
@@ -192,7 +260,7 @@ def fetch_new_mail(max_results: int = 20) -> int:
         # Everyone on the thread: the only people the agent may invite or mention without the principal adding them.
         participants = sorted({a.lower() for _, a in getaddresses([_header(p, h) for h in ("From", "To", "Cc")]) if a})
         store.upsert_request(msg["id"], msg["threadId"], _header(p, "Message-ID"), sender, subject, body, received, kind,
-                             participants)
+                             participants, attachments=_attachment_names(p), automated=is_automated(p, sender))
         added += 1
     if added:
         store.log("mail_fetched", count=added)

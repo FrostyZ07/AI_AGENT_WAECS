@@ -51,7 +51,7 @@ _REQ_COLS = (
     'id, thread_id AS "threadId", message_id AS "messageId", from_addr AS "from", subject, body, '
     'to_char(received_at AT TIME ZONE %(tz)s, \'HH24:MI\') AS "receivedAt", '
     'to_char(received_at AT TIME ZONE %(tz)s, \'DD Mon\') AS "receivedOn", '
-    'kind, triage, processed, participants, reject_note AS "rejectNote"'
+    'kind, triage, processed, participants, reject_note AS "rejectNote", attachments, automated'
 )
 
 
@@ -60,7 +60,8 @@ def _tz() -> str:
 
 
 def list_requests() -> list[dict]:
-    return _q(f"SELECT {_REQ_COLS} FROM requests ORDER BY received_at", {"tz": _tz()})
+    """Requests the agent and the UI work with. Skipped bulk mail stays stored (so it is not fetched again) but hidden."""
+    return _q(f"SELECT {_REQ_COLS} FROM requests WHERE kind <> 'bulk' ORDER BY received_at", {"tz": _tz()})
 
 
 def get_request(request_id: str) -> dict | None:
@@ -72,16 +73,18 @@ def request_exists(request_id: str) -> bool:
 
 
 def upsert_request(id: str, thread_id: str, message_id: str, from_addr: str, subject: str, body: str,
-                   received_at, kind: str, participants: list[str] | None = None) -> None:
+                   received_at, kind: str, participants: list[str] | None = None,
+                   attachments: list[str] | None = None, automated: bool = False) -> None:
     _q(
-        "INSERT INTO requests (id, thread_id, message_id, from_addr, subject, body, received_at, kind, participants) "
-        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING",
+        "INSERT INTO requests (id, thread_id, message_id, from_addr, subject, body, received_at, kind, participants, "
+        "attachments, automated) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING",
         (id, thread_id, message_id, from_addr, subject, body, received_at, kind,
-         json.dumps(participants) if participants is not None else None), write=True,
+         json.dumps(participants) if participants is not None else None,
+         json.dumps(attachments or []), automated), write=True,
     )
 
 
-_REQ_FIELDS = {"triage", "processed", "reject_note"}
+_REQ_FIELDS = {"triage", "processed", "reject_note", "kind"}
 
 
 def update_request(request_id: str, **fields) -> None:
@@ -92,6 +95,12 @@ def update_request(request_id: str, **fields) -> None:
     _q(f"UPDATE requests SET {sets} WHERE id = %(id)s", {**fields, "id": request_id}, write=True)
 
 
+def bump_attempts(request_id: str) -> int:
+    """Count one more failed agent run on a request. Returns the new count."""
+    row = _q("UPDATE requests SET attempts = attempts + 1 WHERE id = %s RETURNING attempts", (request_id,), one=True)
+    return row["attempts"] if row else 0
+
+
 # ---- approvals --------------------------------------------------------------
 
 # Joined with the original request so the approval card can show who wrote what.
@@ -100,7 +109,7 @@ _APR_SELECT = (
     'a.start, a."end", a.attendees, a.google_ref AS "googleRef", '
     'to_char(a.meeting_date, \'YYYY-MM-DD\') AS "meetingDate", a.edited, a.decision_note AS "decisionNote", '
     'to_char(a.created_at AT TIME ZONE %(tz)s, \'DD Mon HH24:MI\') AS "createdAt", '
-    'r.from_addr AS "from", r.subject AS "subject", left(r.body, 1500) AS "body", '
+    'r.from_addr AS "from", r.subject AS "subject", left(r.body, 1500) AS "body", r.message_id AS "messageId", '
     'to_char(r.received_at AT TIME ZONE %(tz)s, \'DD Mon HH24:MI\') AS "receivedAt" '
     'FROM approvals a LEFT JOIN requests r ON r.id = a.request_id'
 )
@@ -174,6 +183,7 @@ def add_approval(type_: str, summary: str, request_id: str | None = None, draft:
 DEFAULT_SETTINGS = {
     "timezone": "Asia/Kolkata", "briefTime": "08:00", "pollMinutes": 10,
     "attendeeAllowDomains": [], "reminderMinutes": 15, "escalationAlerts": True,
+    "workingDays": [0, 1, 2, 3, 4], "minNoticeMinutes": 120,  # 0 = Monday
 }
 
 
@@ -198,6 +208,12 @@ def save_brief(text: str) -> dict:
     return get_brief()
 
 
+def brief_emailed_since(ts) -> bool:
+    """Whether a scheduled (emailed) brief went out at or after `ts` (an aware datetime)."""
+    return _q("SELECT 1 AS x FROM audit_log WHERE event = 'brief_generated' AND details->>'emailed' = 'true' "
+              "AND at >= %s LIMIT 1", (ts,), one=True) is not None
+
+
 def get_token() -> dict | None:
     return _q("SELECT token, email FROM oauth_token WHERE id = 1", one=True)
 
@@ -206,6 +222,10 @@ def save_token(token: dict, email: str | None = None) -> None:
     _q("INSERT INTO oauth_token (id, token, email) VALUES (1, %s, %s) "
        "ON CONFLICT (id) DO UPDATE SET token = EXCLUDED.token, email = COALESCE(EXCLUDED.email, oauth_token.email)",
        (json.dumps(token), email), write=True)
+
+
+def delete_token() -> None:
+    _q("DELETE FROM oauth_token WHERE id = 1", write=True)
 
 
 def log(event: str, **details) -> None:

@@ -13,6 +13,8 @@ export type Settings = {
   attendeeAllowDomains: string[];
   reminderMinutes: number;
   escalationAlerts: boolean;
+  workingDays: number[]; // 0 = Monday ... 6 = Sunday
+  minNoticeMinutes: number;
 };
 
 export type State = {

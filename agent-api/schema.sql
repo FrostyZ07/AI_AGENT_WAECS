@@ -8,16 +8,19 @@ create table if not exists requests (
   subject text not null default '',
   body text not null default '',
   received_at timestamptz not null default now(),
-  kind text not null default 'mail',   -- 'mail' | 'meeting'
+  kind text not null default 'mail',   -- 'mail' | 'meeting' | 'bulk' (automated, skipped, hidden from the UI)
   triage text not null default 'routine',
   processed boolean not null default false,
   participants jsonb,                  -- From/To/Cc addresses
-  reject_note text                     -- principal's reason when a proposal was rejected
+  reject_note text,                    -- principal's reason when a proposal was rejected
+  attempts int not null default 0,     -- failed agent runs; at 3 the request goes to the principal for review
+  attachments jsonb,                   -- attachment file names (checked by the payment/travel guardrail)
+  automated boolean not null default false  -- newsletter / list / auto-reply / no-reply sender
 );
 
 create table if not exists approvals (
   id serial primary key,
-  type text not null,                  -- reply | meeting | payment | travel | sensitive
+  type text not null,                  -- reply | meeting | payment | travel | sensitive | review
   summary text not null,
   draft text,
   status text not null default 'pending',   -- pending | approving | approved | rejected
@@ -84,5 +87,7 @@ insert into settings (id, data) values (1, '{
   "pollMinutes": 10,
   "attendeeAllowDomains": [],
   "reminderMinutes": 15,
-  "escalationAlerts": true
+  "escalationAlerts": true,
+  "workingDays": [0, 1, 2, 3, 4],
+  "minNoticeMinutes": 120
 }') on conflict (id) do nothing;

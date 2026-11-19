@@ -2,7 +2,7 @@ import hmac
 import os
 import re
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, timedelta
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -23,12 +23,40 @@ def _poll_inbox() -> None:
     agent.process_inbox()
 
 
+def _brief_failed_alert(error: str) -> None:
+    """Tell the principal (own inbox) that today's brief did not go out. Gmail may be the thing that failed: log it."""
+    try:
+        google_api.send_to_self(
+            "Your daily brief failed",
+            f"Your daily brief could not be prepared.\nReason: {error[:300]}\nOpen {UI_URL}/brief to generate it by hand.",
+        )
+        log("brief_failure_alert_sent")
+    except Exception as e:
+        log("brief_alert_failed", error=str(e)[:300])
+
+
 def _daily_brief() -> None:
     try:
         agent.prepare_upcoming()  # meeting prep notes first, so the brief can include them
     except Exception as e:
         log("prep_error", error=str(e)[:300])
-    agent.generate_brief(email=True)
+    try:
+        agent.generate_brief(email=True)
+    except Exception as e:
+        log("brief_failed", error=str(e)[:300])
+        _brief_failed_alert(str(e))
+        raise  # _safe logs it as a scheduler error too
+
+
+BRIEF_CHECK_DELAY = 30  # minutes after briefTime
+
+
+def _brief_watchdog() -> None:
+    """Runs BRIEF_CHECK_DELAY minutes after the brief time: if no brief was emailed, try once more (which alerts on failure)."""
+    if store.brief_emailed_since(tools.now() - timedelta(minutes=BRIEF_CHECK_DELAY + 30)):
+        return
+    log("brief_missed")
+    _daily_brief()
 
 
 def _safe(fn):
@@ -45,8 +73,12 @@ def reschedule() -> None:
     s = store.get_settings()
     hh, mm = s["briefTime"].split(":")
     scheduler.add_job(_safe(_poll_inbox), "interval", minutes=int(s["pollMinutes"]), id="poll", replace_existing=True)
+    # A busy or briefly paused process would otherwise skip the brief silently (the default grace is 1 second).
     scheduler.add_job(_safe(_daily_brief), "cron", hour=int(hh), minute=int(mm), timezone=s["timezone"],
-                      id="brief", replace_existing=True)
+                      id="brief", replace_existing=True, misfire_grace_time=1800, coalesce=True)
+    check = (int(hh) * 60 + int(mm) + BRIEF_CHECK_DELAY) % (24 * 60)
+    scheduler.add_job(_safe(_brief_watchdog), "cron", hour=check // 60, minute=check % 60, timezone=s["timezone"],
+                      id="brief_check", replace_existing=True, misfire_grace_time=1800, coalesce=True)
 
 
 @asynccontextmanager
@@ -119,6 +151,15 @@ class Settings(BaseModel):
     attendeeAllowDomains: list[str] = []
     reminderMinutes: int = Field(15, ge=0, le=1440)
     escalationAlerts: bool = True
+    workingDays: list[int] = [0, 1, 2, 3, 4]  # 0 = Monday ... 6 = Sunday
+    minNoticeMinutes: int = Field(120, ge=0, le=1440)
+
+    @field_validator("workingDays")
+    @classmethod
+    def _days(cls, v: list[int]) -> list[int]:
+        if not v or any(d < 0 or d > 6 for d in v):
+            raise ValueError("pick at least one working day (0 = Monday ... 6 = Sunday)")
+        return sorted(set(v))
 
     @field_validator("briefTime")
     @classmethod
@@ -181,7 +222,10 @@ def state():
 
 @api.post("/process-inbox")
 def process_inbox():
-    return _run(agent.process_inbox)
+    result = _run(agent.process_inbox)
+    if result.get("busy"):
+        raise HTTPException(409, "Inbox processing is already running. Try again in a minute.")
+    return result
 
 
 @api.post("/brief")
@@ -230,6 +274,8 @@ def _apply_approved(a: dict, draft: str | None, attendees: list[str]) -> str | N
         day = (date.fromisoformat(a["meetingDate"]) - tools.today()).days if a.get("meetingDate") else a["day"]
         if day < 0:
             raise HTTPException(409, "This meeting's date has passed. Reject it and re-run the inbox.")
+        if tools.slot_start(day, a["start"]) < tools.now():  # a["start"] already holds the principal's edit, if any
+            raise HTTPException(409, "This time has already passed. Edit the time or reject it.")
         # Re-check against the live calendar: it may have changed since the proposal was made.
         for m in google_api.list_meetings(day, day):
             if not m["allDay"] and a["start"] < m["end"] and a["end"] > m["start"]:
@@ -336,6 +382,12 @@ def save_settings(s: Settings):
 def google_start():
     # JSON, not a redirect: only a caller holding the API key can start (or replace) the Google connection.
     return {"url": _run(google_api.auth_url)}
+
+
+@api.post("/oauth/google/disconnect")
+def google_disconnect():
+    _run(google_api.disconnect)
+    return {"ok": True}
 
 
 @app.get("/oauth/google/callback")  # reached by Google's redirect, so no key; the PKCE state ties it to a start call
