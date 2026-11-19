@@ -4,8 +4,11 @@ import base64
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from types import SimpleNamespace as NS
+
 import pytest
 from fastapi.testclient import TestClient
+from google.genai import types as gt
 
 from app import agent, google_api, main, prompt, store, tools
 
@@ -106,6 +109,16 @@ def fake(monkeypatch):
     monkeypatch.setattr(google_api, "principal_email", lambda: "me@corp.com")
     monkeypatch.setattr(google_api, "send_to_self", lambda subject, text: db["alerts"].append((subject, text)))
     monkeypatch.setattr(main.store, "get_request", lambda rid: db["requests"].get(rid))
+    monkeypatch.setattr(agent, "log", lambda *a, **k: None)
+    monkeypatch.setattr(store, "list_requests", lambda: list(db["requests"].values()))
+    monkeypatch.setattr(google_api, "fetch_new_mail", lambda: 0)
+
+    def bump(rid):
+        r = db["requests"][rid]
+        r["attempts"] = r.get("attempts", 0) + 1
+        return r["attempts"]
+
+    monkeypatch.setattr(store, "bump_attempts", bump)
     return db
 
 
@@ -358,6 +371,89 @@ def test_no_meetings_on_non_working_days(fake, monkeypatch):
 def test_prompt_names_working_days_and_notice():
     p = prompt.build_system_prompt({**SETTINGS, "workingDays": [0, 5], "minNoticeMinutes": 90})
     assert "Monday, Saturday" in p and "90 minutes" in p
+
+
+# ---- unhandled mail goes to the principal ------------------------------------------------
+
+
+def gemini_reply(calls=(), finish=gt.FinishReason.STOP, empty=False):
+    """A fake generate_content response: tool calls as (name, args) pairs, or a plain final answer."""
+    if empty:
+        return NS(function_calls=None, candidates=[], text=None)
+    fc = [NS(name=n, args=a) for n, a in calls] or None
+    return NS(function_calls=fc, text="done", candidates=[NS(finish_reason=finish, content=gt.Content(role="model", parts=[]))])
+
+
+class FakeGemini:
+    """Replays the given responses in order, repeating the last one. Or raises, if given an exception."""
+
+    def __init__(self, *responses):
+        self.responses, self.models = list(responses), self
+
+    def generate_content(self, **_):
+        r = self.responses.pop(0) if len(self.responses) > 1 else self.responses[0]
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+
+def run_inbox(monkeypatch, *responses):
+    monkeypatch.setattr(agent, "_client", lambda: FakeGemini(*responses))
+    return agent.process_inbox()
+
+
+def reviews(fake):
+    return [a for a in fake["approvals"] if a["type"] == "review"]
+
+
+def test_model_that_does_nothing_sends_the_mail_for_review(fake, monkeypatch):
+    fake["requests"]["m"] = req("m", "Partnership idea", "let's talk")
+    out = run_inbox(monkeypatch, gemini_reply())
+    assert out["review"] == ["m"] and fake["requests"]["m"]["processed"] is True
+    assert len(reviews(fake)) == 1 and "Partnership idea" in reviews(fake)[0]["summary"]
+    assert len(fake["alerts"]) == 1 and "review" in fake["alerts"][0][0]
+
+
+@pytest.mark.parametrize("response", [gemini_reply(empty=True), gemini_reply(finish=gt.FinishReason.SAFETY)])
+def test_blocked_or_empty_model_answer_goes_to_review(fake, monkeypatch, response):
+    fake["requests"]["m"] = req("m", "Hello", "hi")
+    assert run_inbox(monkeypatch, response)["review"] == ["m"]
+    assert len(reviews(fake)) == 1
+
+
+def test_step_limit_goes_to_review(fake, monkeypatch):
+    fake["requests"]["m"] = req("m", "Hello", "hi")
+    assert run_inbox(monkeypatch, gemini_reply([("get_calendar", {"from_day": 0, "to_day": 1})]))["review"] == ["m"]
+
+
+def test_triaged_mail_is_not_sent_for_review(fake, monkeypatch):
+    fake["requests"]["m"] = req("m", "FYI", "newsletter")
+    out = run_inbox(monkeypatch, gemini_reply([("set_triage", {"request_id": "m", "triage": "routine", "reason": "fyi"})]),
+                    gemini_reply())
+    assert out["review"] == [] and reviews(fake) == [] and fake["requests"]["m"]["triage"] == "routine"
+
+
+def test_forced_escalation_is_not_also_sent_for_review(fake, monkeypatch):
+    fake["requests"]["p"] = req("p", "Invoice 7", "pay Rs 100")
+    assert run_inbox(monkeypatch, gemini_reply())["review"] == []
+    assert [a["type"] for a in fake["approvals"]] == ["payment"]
+
+
+def test_mail_that_keeps_failing_goes_to_review_after_three_tries(fake, monkeypatch):
+    fake["requests"]["m"] = req("m", "Hello", "hi")
+    for attempt in (1, 2):
+        out = run_inbox(monkeypatch, RuntimeError("gemini 500"))
+        assert out["failed"][0]["id"] == "m" and fake["requests"]["m"]["processed"] is False and reviews(fake) == []
+    out = run_inbox(monkeypatch, RuntimeError("gemini 500"))
+    assert out["review"] == ["m"] and fake["requests"]["m"]["processed"] is True and len(reviews(fake)) == 1
+    assert run_inbox(monkeypatch, RuntimeError("gemini 500"))["failed"] == []  # no longer retried
+
+
+def test_approving_a_review_item_sends_nothing(fake, client, monkeypatch):
+    fake["requests"]["m"] = req("m", "Hello", "hi")
+    run_inbox(monkeypatch, gemini_reply())
+    assert client.post(f"/approvals/{reviews(fake)[0]['id']}", json={"status": "approved"}).status_code == 200
+    assert fake["sent"] == [] and fake["events"] == []
 
 
 # ---- leak guards ---------------------------------------------------------------------

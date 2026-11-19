@@ -12,12 +12,13 @@ create table if not exists requests (
   triage text not null default 'routine',
   processed boolean not null default false,
   participants jsonb,                  -- From/To/Cc addresses
-  reject_note text                     -- principal's reason when a proposal was rejected
+  reject_note text,                    -- principal's reason when a proposal was rejected
+  attempts int not null default 0      -- failed agent runs; at 3 the request goes to the principal for review
 );
 
 create table if not exists approvals (
   id serial primary key,
-  type text not null,                  -- reply | meeting | payment | travel | sensitive
+  type text not null,                  -- reply | meeting | payment | travel | sensitive | review
   summary text not null,
   draft text,
   status text not null default 'pending',   -- pending | approving | approved | rejected

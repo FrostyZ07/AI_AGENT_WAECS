@@ -1,18 +1,19 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { CalendarDays, IndianRupee, Mail, Plane, ShieldAlert, X, type LucideIcon } from 'lucide-react'
+import { CalendarDays, CircleHelp, IndianRupee, Mail, Plane, ShieldAlert, X, type LucideIcon } from 'lucide-react'
 import { decideApprovalAction } from '@/app/actions'
 import { linkButtonClass } from '@/components/action-button'
 import { NoteBox, Pill, iconTile, panel } from '@/components/dashboard'
 import { formatTime } from '@/lib/format'
 import type { Approval, ApprovalType } from '@/lib/types'
 
-const flagged: ApprovalType[] = ['payment', 'travel', 'sensitive']
+const flagged: ApprovalType[] = ['payment', 'travel', 'sensitive', 'review']
 const typeIcon: Record<ApprovalType, LucideIcon> = {
   payment: IndianRupee,
   travel: Plane,
   sensitive: ShieldAlert,
+  review: CircleHelp,
   reply: Mail,
   meeting: CalendarDays,
 }
@@ -77,6 +78,11 @@ export default function ApprovalCard({ a }: { a: Approval }) {
           {a.status === 'approving' && (
             <p role="status" className="mt-2 text-[13px] text-amber-700 dark:text-amber-300">
               This is being sent or booked, or was interrupted. Check Gmail or Calendar before doing anything: it will not be sent again.
+            </p>
+          )}
+          {a.type === 'review' && a.status === 'pending' && (
+            <p className="mt-2 text-[13px] text-[#655e57] dark:text-zinc-400">
+              The assistant could not handle this email. Nothing was drafted or sent. Read it below, deal with it in Gmail, then mark it as handled.
             </p>
           )}
           {a.decisionNote && <p className="mt-2 text-[13px] text-[#655e57] dark:text-zinc-400">Your reason: {a.decisionNote}</p>}
@@ -187,7 +193,15 @@ export default function ApprovalCard({ a }: { a: Approval }) {
               <div className="flex flex-wrap gap-2">
                 {!rejecting && (
                   <button type="button" disabled={pending} onClick={() => decide('approved')} className={linkButtonClass('success')}>
-                    {pending ? 'Working…' : a.type === 'reply' ? 'Approve and send' : a.type === 'meeting' ? 'Approve and invite' : 'Sign off'}
+                    {pending
+                      ? 'Working…'
+                      : a.type === 'reply'
+                        ? 'Approve and send'
+                        : a.type === 'meeting'
+                          ? 'Approve and invite'
+                          : a.type === 'review'
+                            ? 'Mark as handled'
+                            : 'Sign off'}
                   </button>
                 )}
                 {rejecting ? (

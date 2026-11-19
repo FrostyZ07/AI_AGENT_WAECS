@@ -92,6 +92,12 @@ def update_request(request_id: str, **fields) -> None:
     _q(f"UPDATE requests SET {sets} WHERE id = %(id)s", {**fields, "id": request_id}, write=True)
 
 
+def bump_attempts(request_id: str) -> int:
+    """Count one more failed agent run on a request. Returns the new count."""
+    row = _q("UPDATE requests SET attempts = attempts + 1 WHERE id = %s RETURNING attempts", (request_id,), one=True)
+    return row["attempts"] if row else 0
+
+
 # ---- approvals --------------------------------------------------------------
 
 # Joined with the original request so the approval card can show who wrote what.
