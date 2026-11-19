@@ -2,6 +2,8 @@
 
 Visit: https://ai-agent-waecs.vercel.app pwd:123456789
 
+swagger: https://ai-agent-waecs.onrender.com/docs
+
 An AI assistant for a busy principal. It triages the inbox, drafts replies, proposes meetings, preps for calls and sends a daily brief. **Nothing is sent, booked or paid without the principal's approval.**
 
 Built from the spec in `../07_executive_assistant_agent.md`.
