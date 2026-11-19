@@ -199,7 +199,9 @@ def save_settings(data: dict) -> dict:
 
 
 def get_brief() -> dict | None:
-    return _q('SELECT text, to_char(generated_at, \'YYYY-MM-DD"T"HH24:MI:SS\') AS "generatedAt" FROM brief WHERE id = 1', one=True)
+    # generated_at is timestamptz: convert to the principal's timezone, or it comes out in the DB session's (UTC).
+    return _q('SELECT text, to_char(generated_at AT TIME ZONE %(tz)s, \'YYYY-MM-DD"T"HH24:MI:SS\') AS "generatedAt" '
+              "FROM brief WHERE id = 1", {"tz": _tz()}, one=True)
 
 
 def save_brief(text: str) -> dict:
